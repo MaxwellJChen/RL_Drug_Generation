@@ -1,6 +1,5 @@
 import pandas as pd
-import numpy
+import numpy as np
 import pickle
 
-chembl = pd.read_csv("/Data/sample_tsv.txt", sep='\t', lineterminator='\r')
-print(chembl)
+C = pd.read_csv('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Data/combined.csv')
