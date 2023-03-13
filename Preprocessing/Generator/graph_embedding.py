@@ -6,6 +6,7 @@ import numpy as np
 
 """
 https://www.blopig.com/blog/2022/02/how-to-turn-a-smiles-string-into-a-molecular-graph-for-pytorch-geometric/
+https://arxiv.org/pdf/2012.04444.pdf
 12 one-hot vector specifying the type of atom
 H, C, O, N, S, F, Cl, P, Br, I, B, Si, Sn
 6 number of heavy neighbours as one-hot vector
@@ -17,7 +18,7 @@ H, C, O, N, S, F, Cl, P, Br, I, B, Si, Sn
 
 def one_hot_encoding(x, permitted_list):
     """
-    Maps input elements x which are not in the permitted list to the last element of the permitted list.
+    Maps input elements x which are not in the permitted list to the last element of the permitted list
     """
     if x not in permitted_list:
         x = permitted_list[-1]
@@ -26,24 +27,24 @@ def one_hot_encoding(x, permitted_list):
 
 def get_atom_features(atom):
     """
-    Takes an RDKit atom object as input and gives a 1d-numpy array of atom features as output.
+    Takes an RDKit atom object as input and gives a 1D-numpy array of atom features as output
     """
     # define list of permitted atoms
     permitted_list_of_atoms = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B', 'Si', 'Sn']
 
     # compute atom features
-    atom_type_enc = one_hot_encoding(str(atom.GetSymbol()), permitted_list_of_atoms)
-    n_heavy_neighbors_enc = one_hot_encoding(int(atom.GetDegree()), [0, 1, 2, 3, 4, "More"])
-    formal_charge_enc = int(int(atom.GetFormalCharge()) != 0)
-    is_in_a_ring_enc = [int(atom.IsInRing())]
-    is_aromatic_enc = [int(atom.GetIsAromatic())]
-    n_hydrogens_enc = one_hot_encoding(int(atom.GetTotalNumHs()), [0, 1, 2, 3, 4, "MoreThanFour"])
-    atom_feature_vector = atom_type_enc + n_heavy_neighbors_enc + formal_charge_enc + is_in_a_ring_enc + is_aromatic_enc + n_hydrogens_enc
+    atom_type_enc = one_hot_encoding(str(atom.GetSymbol()), permitted_list_of_atoms) # 12 one-hot vector specifying type of atom
+    n_heavy_neighbors_enc = one_hot_encoding(int(atom.GetDegree()), [0, 1, 2, 3, 4, "More"]) # 6 heavy neighbors vector
+    n_hydrogens_enc = one_hot_encoding(int(atom.GetTotalNumHs()), [0, 1, 2, 3, 4, "MoreThanFour"]) # 5 Number of hydrogen atoms vector
+    formal_charge_enc = [int(int(atom.GetFormalCharge()) != 0)] # 1 formal charge binary encoding
+    is_in_a_ring_enc = [int(atom.IsInRing())] # 1 ring inclusion binary encoding
+    is_aromatic_enc = [int(atom.GetIsAromatic())] # 1 aromatic binary encoding
+    atom_feature_vector = atom_type_enc + n_heavy_neighbors_enc + n_hydrogens_enc + formal_charge_enc + is_in_a_ring_enc + is_aromatic_enc
     return np.array(atom_feature_vector)
 
 def get_bond_features(bond):
     """
-    Takes an RDKit bond object as input and gives a 1d-numpy array of bond features as output.
+    Takes an RDKit bond object as input and gives a 1D-numpy array of bond features as output
     """
     permitted_list_of_bond_types = [Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.DOUBLE,
                                     Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.AROMATIC]
@@ -53,14 +54,10 @@ def get_bond_features(bond):
 def graph_from_labels(x_smiles):
     """
     Inputs:
-
     x_smiles = [smiles_1, smiles_2, ....] ... a list of SMILES strings
-    y = [y_1, y_2, ...] ... a list of numerial labels for the SMILES strings (such as associated pKi values)
 
     Outputs:
-
     data_list = [G_1, G_2, ...] ... a list of torch_geometric.data.Data objects which represent labeled molecular graphs that can readily be used for machine learning
-
     """
 
     data_list = []

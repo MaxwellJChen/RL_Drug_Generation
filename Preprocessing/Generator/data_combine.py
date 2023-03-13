@@ -13,5 +13,5 @@ import numpy as np
 # combined.to_csv('combined.csv')
 
 # combined = pd.read_pickle('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Data/combined.pkl')
-combined = pd.read_csv('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Data/combined.csv')
+combined = pd.read_csv('/Data/combined.csv')
 # print(combined.info)
