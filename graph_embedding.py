@@ -101,3 +101,7 @@ def graph_from_labels(x_smiles):
         data_list.append(torch_geometric.data.Data(x=X, edge_index=E, edge_attr=EF))
 
     return data_list
+
+g = graph_from_labels(["FC1=CC=C(C(=O)NC2=CC=C(C3=NN(N=N3)CC(=O)N4CCN(CC4)C(=O)C=5OC=CC5)C=C2)C=C1"])[0]
+print(g.num_node_features)
+print(g.num_edge_features)
