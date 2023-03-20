@@ -51,7 +51,7 @@ def get_bond_features(bond):
     bond_feature_vector = one_hot_encoding(bond.GetBondType(), permitted_list_of_bond_types)
     return np.array(bond_feature_vector)
 
-def graph_from_labels(x_smiles):
+def graph_from_smiles(x_smiles, y):
     """
     Inputs:
     x_smiles = [smiles_1, smiles_2, ....] ... a list of SMILES strings
@@ -62,7 +62,7 @@ def graph_from_labels(x_smiles):
 
     data_list = []
 
-    for smiles in x_smiles:
+    for (smiles, y_val) in zip(x_smiles, y):
 
         # convert SMILES to RDKit mol object
         mol = Chem.MolFromSmiles(smiles)
@@ -97,11 +97,13 @@ def graph_from_labels(x_smiles):
 
         EF = torch.tensor(EF, dtype=torch.float)
 
+        y_tensor = torch.tensor(np.array([y_val]), dtype = torch.float)
+
         # construct Pytorch Geometric data object and append to data list
-        data_list.append(torch_geometric.data.Data(x=X, edge_index=E, edge_attr=EF))
+        data_list.append(torch_geometric.data.Data(x=X, edge_index=E, edge_attr=EF, y = y_tensor))
 
     return data_list
 
-g = graph_from_labels(["FC1=CC=C(C(=O)NC2=CC=C(C3=NN(N=N3)CC(=O)N4CCN(CC4)C(=O)C=5OC=CC5)C=C2)C=C1"])[0]
-print(g.num_node_features)
-print(g.num_edge_features)
+# g = graph_from_labels(["FC1=CC=C(C(=O)NC2=CC=C(C3=NN(N=N3)CC(=O)N4CCN(CC4)C(=O)C=5OC=CC5)C=C2)C=C1"])[0]
+# print(g.num_node_features)
+# print(g.num_edge_features)

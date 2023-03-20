@@ -3,12 +3,12 @@ from torch_geometric.nn import GATv2Conv, global_mean_pool, GCNConv
 import torch.nn as nn
 import torch.nn.functional as F
 
-class QSAR(nn.Module):
+class GAT_qsar(nn.Module):
     # 27 node features
     # 4 edge features
 
     def __init__(self):
-        super(QSAR, self).__init__()
+        super(GAT_qsar, self).__init__()
         self.GAT1 = GATv2Conv(27, 100)
         self.GAT2 = GATv2Conv(100, 60)
         self.GAT3 = GATv2Conv(60, 30)
@@ -34,3 +34,11 @@ class QSAR(nn.Module):
         x = self.fcn2(x)
 
         return x
+
+# training
+from graph_embedding import graph_from_smiles
+from torch_geometric.data import DataLoader
+
+
+
+model = GAT_qsar()
