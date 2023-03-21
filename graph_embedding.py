@@ -62,9 +62,10 @@ def graph_from_smiles(x_smiles, y):
 
     data_list = []
 
-    for (smiles, y_val) in zip(x_smiles, y):
+    for i, (smiles, y_val) in enumerate(zip(x_smiles, y)):
 
         # convert SMILES to RDKit mol object
+        print(i)
         mol = Chem.MolFromSmiles(smiles)
 
         # get feature dimensions

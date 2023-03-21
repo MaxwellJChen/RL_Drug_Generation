@@ -1,9 +1,13 @@
-import torch_geometric
+from torch_geometric.loader import DataLoader
+import pickle
 from torch_geometric.nn import GATv2Conv, global_mean_pool, GCNConv
 import torch.nn as nn
 from torch.nn import Linear
 import torch.nn.functional as F
 import torch
+import random
+from tqdm import tqdm
+random.seed(42)
 
 """
 Architecture
@@ -16,103 +20,87 @@ class GCN_qsar(nn.Module):
 
     def __init__(self):
         super(GCN_qsar, self).__init__()
-        torch.manual_seed(12345)
+        torch.manual_seed(42)
+
+        # GCN embedding layers
         self.conv1 = GCNConv(27, 64)
         self.conv2 = GCNConv(64, 64)
         self.conv3 = GCNConv(64, 64)
-        self.lin = Linear(64, 1)
+
+        # FCN layers
+        self.fcn1 = Linear(64, 2)
 
     def forward(self, x, edge_index, batch):
-        # 1. Obtain node embeddings
         x = self.conv1(x, edge_index)
         x = x.relu()
+
         x = self.conv2(x, edge_index)
         x = x.relu()
+
         x = self.conv3(x, edge_index)
+        x = x.relu()
 
-        # 2. Readout layer
-        x = global_mean_pool(x, batch)  # [batch_size, hidden_channels]
+        x = global_mean_pool(x, batch)
 
-        # 3. Apply a final classifier
-        x = F.dropout(x, p=0.5, training=self.training)
-        x = self.lin(x)
-
-        x = x.sigmoid()
+        x = F.dropout(x, p = 0.5, training=self.training)
+        x = self.fcn1(x)
 
         return x
 
-    # def __init__(self):
-    #     super(GCN_qsar, self).__init__()
-    #     self.GCN1 = GCNConv(27, 100)
-    #     self.GCN2 = GCNConv(100, 60)
-    #     self.GCN3 = GCNConv(60, 30)
-    #     self.fcn1 = nn.Linear(30, 20)
-    #     self.fcn2 = nn.Linear(20, 1)
-    #
-    # def forward(self, x, edge_index, batch):
-    #     x = self.GCN1(x, edge_index)
-    #     x = x.relu()
-    #
-    #     x = self.GCN2(x, edge_index)
-    #     x = x.relu()
-    #
-    #     x = self.GCN3(x, edge_index)
-    #
-    #     x = global_mean_pool(x, batch)
-    #
-    #     x = F.dropout(x, p = 0.5, training = self.training)
-    #
-    #     x = self.fcn1(x)
-    #     x = x.relu()
-    #
-    #     x = F.dropout(x, p = 0.5, training = self.training)
-    #     x = self.fcn2(x)
-    #     x = x.sigmoid()
-    #
-    #     return x
-
-"""
-Training
-"""
-
-from graph_embedding import graph_from_smiles
-from torch_geometric.loader import DataLoader
-import pandas as pd
-import numpy as np
-import pickle
-
-# drd2 = pd.read_csv("DRD2.csv").to_numpy()
-# drd2 = np.sort(drd2, axis = 0)
-# drd2 = drd2[:9226]
+"""MUTAG dataset"""
+# from torch_geometric.datasets import TUDataset
 #
-# train = np.concatenate((drd2[:3690], drd2[4613:8303]), axis = 0)
-# test = np.concatenate((drd2[3690:4613], drd2[8303:]), axis = 0)
-# train = graph_from_smiles(train[:, 1], [int(y) for y in train[:, 0] == "A"])
-# test = graph_from_smiles(test[:, 1], [int(y) for y in test[:, 0] == "A"])
-# print("Embedding done!")
-#
-# p_train = open('DRD2_train_loader', 'wb')
-# p_test = open('DRD2_test_loader', 'wb')
-# train_loader = DataLoader(train, batch_size = 64, shuffle = True)
-# test_loader = DataLoader(test, batch_size = 64, shuffle = True)
-# pickle.dump(train_loader, p_train)
-# pickle.dump(test_loader, p_test)
+# dataset = TUDataset(root='data/TUDataset', name='MUTAG')
+# torch.manual_seed(12345)
+# dataset = dataset.shuffle()
+# train_dataset = dataset[:150]
+# test_dataset = dataset[150:]
+# train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+# test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+
+"""DRD2"""
+drd2 = pickle.load(open("/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/QSAR/DRD2/Graphs/DRD2_graphs", 'rb'))
+
+# Stratified split
+actives = drd2[:4612]
+random.shuffle(actives)
+inactives = drd2[4612:]
+random.shuffle(inactives)
+
+train = actives[:3690] + inactives[:274422]
+test = actives[3690:] + inactives[274422:]
+
+print(len(train))
+print(len(test))
+
+"""DRD2 10000"""
+# drd2 = pickle.load(open("/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/QSAR/DRD2/Graphs/DRD2_graphs_10000", 'rb'))
+# random.shuffle(drd2)
+# train = drd2[:8000]
+# test = drd2[:2000]
+
+# Test and train dataloaders
+train_loader = DataLoader(train, batch_size = 64, shuffle = True)
+test_loader = DataLoader(test, batch_size = 64, shuffle = True)
+
+print("Data loaded.")
 
 model = GCN_qsar()
-optimizer = torch.optim.Adam(model.parameters(), lr = 0.1)
-criterion = nn.BCELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr = 0.01)
+criterion = torch.nn.CrossEntropyLoss()
 
-def train():
+"""Training"""
+def train(loader):
     model.train()
-    for data in train_loader:
+    tqdm_loader = tqdm(loader, unit = "batch")
+    for data in tqdm_loader:
         out = model(data.x, data.edge_index, data.batch)
-        data = data.y.unsqueeze(1)
-        loss = criterion(out, y)
+        loss = criterion(out, data.y)
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 
-def evaluate(loader):
+def acc(loader):
     model.eval()
     correct = 0
     for data in loader:
@@ -121,21 +109,10 @@ def evaluate(loader):
         correct += int((pred == data.y).sum())
     return correct / len(loader.dataset)
 
-# for epoch in range(1, 31):
-#     train()
-#     train_acc = evaluate(train_loader)
-#     test_acc = evaluate(test_loader)
-#     print(f'Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}')
+for epoch in range(1, 15):
+    train(train_loader)
+    train_acc = acc(train_loader)
+    test_acc = acc(test_loader)
+    print(f'Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}')
 
-out2 = 0
-for count, data in enumerate(train_loader):
-    if count < 3:
-        out = model(data.x, data.edge_index, data.batch)
-        if out == out2:
-            print("Fail")
-        y = data.y.unsqueeze(1)
-        loss = criterion(out, y)
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-        out2 = out
+torch.save(model, "GCN_qsar")
