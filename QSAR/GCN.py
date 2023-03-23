@@ -11,6 +11,7 @@ random.seed(42)
 
 """
 Architecture
+References:
 https://colab.research.google.com/drive/1I8a0DfQ3fI7Njc62__mVXUlcAleUclnb?usp=sharing#scrollTo=mHSP6-RBOqCE
 """
 
@@ -59,6 +60,7 @@ class GCN_qsar(nn.Module):
 # test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
 """DRD2"""
+
 drd2 = pickle.load(open("/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/QSAR/DRD2/Graphs/DRD2_graphs", 'rb'))
 
 # Stratified split
@@ -69,9 +71,6 @@ random.shuffle(inactives)
 
 train = actives[:3690] + inactives[:274422]
 test = actives[3690:] + inactives[274422:]
-
-print(len(train))
-print(len(test))
 
 """DRD2 10000"""
 # drd2 = pickle.load(open("/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/QSAR/DRD2/Graphs/DRD2_graphs_10000", 'rb'))
@@ -109,10 +108,13 @@ def acc(loader):
         correct += int((pred == data.y).sum())
     return correct / len(loader.dataset)
 
-for epoch in range(1, 15):
-    train(train_loader)
-    train_acc = acc(train_loader)
-    test_acc = acc(test_loader)
-    print(f'Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}')
+# for epoch in range(1, 15):
+#     train(train_loader)
+#     train_acc = acc(train_loader)
+#     test_acc = acc(test_loader)
+#     print(f'Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}')
+#
+# torch.save(model, "DRD2_GCN")
 
-torch.save(model, "GCN_qsar")
+model = torch.load("/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/QSAR/DRD2_GCN")
+print(acc(test_loader))

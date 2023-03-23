@@ -3,6 +3,11 @@ from torch_geometric.nn import global_mean_pool, GCNConv
 from torch.nn import Linear
 import torch.nn.functional as F
 
+"""
+References
+https://colab.research.google.com/drive/14OvFnAXggxB8vM4e8vSURUp1TaKnovzX?usp=sharing
+"""
+
 class termination_predictor():
     # 27 node features
     # 4 edge features
@@ -36,10 +41,3 @@ class termination_predictor():
 
         return x
 
-class edge_predictor():
-
-    def __init__(self):
-        super(edge_predictor, self).__init__()
-        torch.manual_seed(42)
-
-class node_predictor():

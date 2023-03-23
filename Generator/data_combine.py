@@ -14,5 +14,5 @@ import numpy as np
 
 # combined = pd.read_pickle('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Data/combined.pkl')
 combined = pd.read_csv('/Generator/SMILES/combined.csv').to_numpy()
-print(np.shpae(combined))
+print(np.shape(combined))
 # print(combined.info)
