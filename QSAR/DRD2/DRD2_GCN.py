@@ -60,8 +60,7 @@ class GCN_qsar(nn.Module):
 # test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
 """DRD2"""
-
-drd2 = pickle.load(open("/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/QSAR/DRD2/Graphs/DRD2_graphs", 'rb'))
+drd2 = pickle.load(open("/QSAR/DRD2/Graphs/DRD2_graphs", 'rb'))
 
 # Stratified split
 actives = drd2[:4612]
@@ -101,6 +100,7 @@ def train(loader):
 
 def acc(loader):
     model.eval()
+
     correct = 0
     for data in loader:
         out = model(data.x, data.edge_index, data.batch)
@@ -108,13 +108,13 @@ def acc(loader):
         correct += int((pred == data.y).sum())
     return correct / len(loader.dataset)
 
-# for epoch in range(1, 15):
-#     train(train_loader)
-#     train_acc = acc(train_loader)
-#     test_acc = acc(test_loader)
-#     print(f'Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}')
-#
-# torch.save(model, "DRD2_GCN")
+for epoch in range(1, 15):
+    train(train_loader)
+    train_acc = acc(train_loader)
+    test_acc = acc(test_loader)
+    print(f'Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}')
 
-model = torch.load("/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/QSAR/DRD2_GCN")
-print(acc(test_loader))
+# torch.save(model, "LogP_GCN")
+
+# model = torch.load("/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/QSAR/DRD2_GCN")
+# print(acc(test_loader))
