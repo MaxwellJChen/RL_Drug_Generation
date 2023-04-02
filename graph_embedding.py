@@ -17,7 +17,7 @@ https://arxiv.org/pdf/2012.04444.pdf
 
 def one_hot_encoding(x, permitted_list):
     """
-    Maps input elements x which are not in the permitted list to the last element of the permitted list
+    Maps input elements x which are not in the permitted list to the last element of the permitted list.
     """
     if x not in permitted_list:
         x = permitted_list[-1]
@@ -26,7 +26,7 @@ def one_hot_encoding(x, permitted_list):
 
 def get_atom_features(atom):
     """
-    Takes an RDKit atom object as input and gives a 1D-numpy array of atom features as output
+    Takes an RDKit atom object as input and gives a 1D-numpy array of atom features as output.
     """
     # define list of permitted atoms
     permitted_list_of_atoms = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B', 'Si', 'Sn']
@@ -43,7 +43,7 @@ def get_atom_features(atom):
 
 def get_bond_features(bond):
     """
-    Takes an RDKit bond object as input and gives a 1D-numpy array of bond features as output
+    Takes an RDKit bond object as input and gives a 1D-numpy array of bond features as output.
     """
     permitted_list_of_bond_types = [Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.DOUBLE,
                                     Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.AROMATIC]
