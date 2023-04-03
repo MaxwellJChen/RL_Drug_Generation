@@ -13,6 +13,9 @@ import sascorer
 # QED
 import rdkit.Chem.QED as QED
 
+# MW
+import rdkit.Chem.Descriptors as Descriptors
+
 """
 Embedded Features
 1. Atom
@@ -29,6 +32,7 @@ Bond types
 3. Molecular
 Number of heavy atoms
 Total atoms (including hydrogens)
+Molecular weight
 
 Metrics
 QED
@@ -53,10 +57,8 @@ def update_hist(hist, value):
 
     return hist
 
-C = pd.read_csv('/Generator/SMILES/chembl_zinc.csv')
-
-smiles = C.loc[0][0]
-mol = Chem.MolFromSmiles(smiles)
+C = pd.read_csv('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Generator/SMILES/zinc_chembl_inactives_with_pchembl_A2AR.csv')
+smiles = C['smiles'].tolist() # List of generator training smiles
 
 # Histograms
 element_type = []
@@ -70,36 +72,57 @@ bond_type = []
 
 num_heavy_atoms = []
 total_num_atoms = []
+molecular_weight = []
 
 sas = []
 qed = []
 
-# Embedded features
-# 1. Atom
-atoms = mol.GetAtoms()
-total_num_hs = 0
-for atom in atoms:
-    element_type = update_hist(element_type, atom.GetSymbol()) # Element type
-    num_heavy_atom_neighbors = update_hist(num_heavy_atom_neighbors, atom.GetDegree()) # Num of heavy atom neighbors
-    num_h_neighbors = update_hist(num_h_neighbors, atom.GetTotalNumHs()) # Num of H neighbors
-    formal_charge = update_hist(formal_charge, atom.GetFormalCharge()) # Formal charge
-    in_a_ring = update_hist(in_a_ring, atom.IsInRing()) # In a ring
-    is_aromatic = update_hist(is_aromatic, atom.GetIsAromatic()) # If in aromatic system
+n = 1
+# Dataset has total of 2559655 molecules, so infeasible to generate full histograms in one go. Breaking up into groups of 200,000.
+# 1: 0, 200000
+# 2: 200000, 400000
+# 3: 400000, 600000
+# 4: 600000, 800000
+# 5: 800000, 1000000
+# 6: 1000000, 1200000
+# 7: 1200000, 1400000
+# 8: 1400000, 1600000
+# 9: 1600000, 1800000
+# 10: 1800000, 2000000
+# 11: 2000000, 2200000
+# 12: 2200000, 2400000
+# 13: 2400000, len(smiles)
+for i in range(0, 200000):
+    print(i)
+    mol = Chem.MolFromSmiles(smiles[i])
 
-    total_num_hs += atom.GetTotalNumHs()
+    # Embedded features
+    # 1. Atom
+    atoms = mol.GetAtoms()
+    total_num_hs = 0
+    for atom in atoms:
+        element_type = update_hist(element_type, atom.GetSymbol()) # Element type
+        num_heavy_atom_neighbors = update_hist(num_heavy_atom_neighbors, atom.GetDegree()) # Num of heavy atom neighbors
+        num_h_neighbors = update_hist(num_h_neighbors, atom.GetTotalNumHs()) # Num of H neighbors
+        formal_charge = update_hist(formal_charge, atom.GetFormalCharge()) # Formal charge
+        in_a_ring = update_hist(in_a_ring, atom.IsInRing()) # In a ring
+        is_aromatic = update_hist(is_aromatic, atom.GetIsAromatic()) # If in aromatic system
 
-# 2. Bond
-bonds = mol.GetBonds()
-for bond in bonds:
-    bond_type = update_hist(bond_type, str(bond.GetBondType())) # Bond type
+        total_num_hs += atom.GetTotalNumHs()
 
-# 3. Molecular
-num_heavy_atoms = update_hist(num_heavy_atoms, mol.GetNumHeavyAtoms()) # Num of heavy atoms in molecule
-total_num_atoms = update_hist(total_num_atoms, total_num_hs + mol.GetNumHeavyAtoms()) # Total number of atoms in molecule (including hydrogens)
+    # 2. Bond
+    bonds = mol.GetBonds()
+    for bond in bonds:
+        bond_type = update_hist(bond_type, str(bond.GetBondType())) # Bond type
 
-# Metrics
-sas = update_hist(sas, sascorer.calculateScore(mol)) # SAS
-qed = update_hist(qed, QED.weights_mean(mol)) # QED
+    # 3. Molecular
+    num_heavy_atoms = update_hist(num_heavy_atoms, mol.GetNumHeavyAtoms()) # Num of heavy atoms in molecule
+    total_num_atoms = update_hist(total_num_atoms, total_num_hs + mol.GetNumHeavyAtoms()) # Total number of atoms in molecule (including hydrogens)
+    molecular_weight = update_hist(molecular_weight, Descriptors.ExactMolWt(mol))
+
+    # Metrics
+    sas = update_hist(sas, sascorer.calculateScore(mol)) # SAS
+    qed = update_hist(qed, QED.weights_mean(mol)) # QED
 
 # Convert to numpy arrays
 element_type = np.array(element_type, dtype = object)
@@ -129,22 +152,24 @@ qed = np.array(qed)
 #
 # print(num_heavy_atoms)
 # print(total_num_atoms)
+# print(molecular_weight)
 #
 # print(sas)
 # print(qed)
 
 # Saving histograms
-np.save("element_type", element_type, allow_pickle=True)
-np.save("num_heavy_atom_neighbors", num_heavy_atom_neighbors, allow_pickle=True)
-np.save("num_h_neighbors", num_h_neighbors, allow_pickle=True)
-np.save("formal_charge", formal_charge, allow_pickle=True)
-np.save("in_a_ring", in_a_ring, allow_pickle=True)
-np.save("is_aromatic", is_aromatic, allow_pickle=True)
+np.save(f"Histograms/{n}/element_type_{n}", element_type, allow_pickle=True)
+np.save(f"Histograms/{n}/num_heavy_atom_neighbors_{n}", num_heavy_atom_neighbors, allow_pickle=True)
+np.save(f"Histograms/{n}/num_h_neighbors_{n}", num_h_neighbors, allow_pickle=True)
+np.save(f"Histograms/{n}/formal_charge_{n}", formal_charge, allow_pickle=True)
+np.save(f"Histograms/{n}/in_a_ring_{n}", in_a_ring, allow_pickle=True)
+np.save(f"Histograms/{n}/is_aromatic_{n}", is_aromatic, allow_pickle=True)
 
-np.save("bond_type", bond_type, allow_pickle=True)
+np.save(f"Histograms/{n}/bond_type_{n}", bond_type, allow_pickle=True)
 
-np.save("num_heavy_atoms", num_heavy_atoms, allow_pickle=True)
-np.save("total_num_atoms", total_num_atoms, allow_pickle=True)
+np.save(f"Histograms/{n}/num_heavy_atoms_{n}", num_heavy_atoms, allow_pickle=True)
+np.save(f"Histograms/{n}/total_num_atoms_{n}", total_num_atoms, allow_pickle=True)
+np.save(f"Histograms/{n}/molecular_weight_{n}", total_num_atoms, allow_pickle=True)
 
-np.save("sas", sas, allow_pickle=True)
-np.save("qed", qed, allow_pickle=True)
+np.save(f"Histograms/{n}/sas_{n}", sas, allow_pickle=True)
+np.save(f"Histograms/{n}/qed_{n}", qed, allow_pickle=True)
