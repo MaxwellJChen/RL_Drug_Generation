@@ -57,7 +57,7 @@ def update_hist(hist, value):
 
     return hist
 
-C = pd.read_csv('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Generator/SMILES/zinc_chembl_inactives_with_pchembl_A2AR.csv')
+C = pd.read_csv('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Generator/SMILES/zinc_chembl.csv')
 smiles = C['smiles'].tolist() # List of generator training smiles
 
 # Histograms
@@ -77,8 +77,8 @@ molecular_weight = []
 sas = []
 qed = []
 
-n = 1
-# Dataset has total of 2559655 molecules, so infeasible to generate full histograms in one go. Breaking up into groups of 200,000.
+n = 2
+# Dataset has total of 2,562,583 molecules, so infeasible to generate full histograms in one go. Breaking up into groups of 200,000.
 # 1: 0, 200000
 # 2: 200000, 400000
 # 3: 400000, 600000
@@ -92,7 +92,7 @@ n = 1
 # 11: 2000000, 2200000
 # 12: 2200000, 2400000
 # 13: 2400000, len(smiles)
-for i in range(0, 200000):
+for i in range(200000, 400000):
     print(i)
     mol = Chem.MolFromSmiles(smiles[i])
 
@@ -136,6 +136,7 @@ bond_type = np.array(bond_type, dtype = object)
 
 num_heavy_atoms = np.array(num_heavy_atoms)
 total_num_atoms = np.array(total_num_atoms)
+molecular_weight = np.array(molecular_weight)
 
 sas = np.array(sas)
 qed = np.array(qed)
@@ -169,7 +170,7 @@ np.save(f"Histograms/{n}/bond_type_{n}", bond_type, allow_pickle=True)
 
 np.save(f"Histograms/{n}/num_heavy_atoms_{n}", num_heavy_atoms, allow_pickle=True)
 np.save(f"Histograms/{n}/total_num_atoms_{n}", total_num_atoms, allow_pickle=True)
-np.save(f"Histograms/{n}/molecular_weight_{n}", total_num_atoms, allow_pickle=True)
+np.save(f"Histograms/{n}/molecular_weight_{n}", molecular_weight, allow_pickle=True)
 
 np.save(f"Histograms/{n}/sas_{n}", sas, allow_pickle=True)
 np.save(f"Histograms/{n}/qed_{n}", qed, allow_pickle=True)

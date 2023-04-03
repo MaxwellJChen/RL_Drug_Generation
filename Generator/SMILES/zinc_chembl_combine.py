@@ -16,11 +16,11 @@ import numpy as np
 # print(combined.info)
 
 # Saving combined datatset
-# combined.to_csv('chembl_zinc.csv', index = False)
+# combined.to_csv('zinc_chembl.csv', index = False)
 
 
 """Removing active SMILES for DRD2 or A2AR from dataset"""
-combined = pd.read_csv('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Generator/SMILES/chembl_zinc.csv').to_numpy().flatten() # Converting to a list for easier manipulation
+combined = pd.read_csv('/Generator/SMILES/zinc_chembl.csv').to_numpy().flatten() # Converting to a list for easier manipulation
 
 # DRD2
 DRD2_sorted = np.load("/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/QSAR/DRD2/SMILES/DRD2_sorted.npy", allow_pickle=True) # Sorted array based on activity
@@ -47,4 +47,4 @@ for i in range(len(combined)):
 d = {'smiles': np.delete(combined, to_remove).tolist()} # Creating dictionary to format into Pandas csv
 combined_without_actives = pd.DataFrame(d)
 print(combined_without_actives.info)
-combined_without_actives.to_csv("zinc_chembl_inactives_with_pchembl_A2AR.csv", index = False)
+combined_without_actives.to_csv("zinc_chembl_inactives.csv", index = False)
