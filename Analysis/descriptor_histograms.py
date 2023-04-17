@@ -46,6 +46,7 @@ Affinity for DRD2
 def update_hist(hist, value):
     """
     Accepts a value of a single descriptor and updates histogram array. Histogram array: (values, counts).
+    Works "half" in place.
     """
 
     if len(hist) == 0: # Histogram is empty
@@ -77,7 +78,7 @@ molecular_weight = []
 sas = []
 qed = []
 
-n = 2
+n = 13
 # Dataset has total of 2,562,583 molecules, so infeasible to generate full histograms in one go. Breaking up into groups of 200,000.
 # 1: 0, 200000
 # 2: 200000, 400000
@@ -92,8 +93,11 @@ n = 2
 # 11: 2000000, 2200000
 # 12: 2200000, 2400000
 # 13: 2400000, len(smiles)
-for i in range(200000, 400000):
+for i in range(2400000, len(smiles)):
     print(i)
+    if i == 2465510: # [11:30:38] Can't kekulize mol.  Unkekulized atoms: 1 2 3 4 5 6 10 11 15 16 17 19 20 21
+        continue
+
     mol = Chem.MolFromSmiles(smiles[i])
 
     # Embedded features
