@@ -58,7 +58,7 @@ def update_hist(hist, value):
 
     return hist
 
-C = pd.read_csv('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Generator/SMILES/zinc_chembl.csv')
+C = pd.read_csv('/Generator/SMILES/zinc_chembl.csv')
 smiles = C['smiles'].tolist() # List of generator training smiles
 
 # Histograms

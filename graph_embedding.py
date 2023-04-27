@@ -50,7 +50,7 @@ def get_bond_features(bond):
     bond_feature_vector = one_hot_encoding(bond.GetBondType(), permitted_list_of_bond_types)
     return np.array(bond_feature_vector)
 
-def graph_from_smiles_y(x_smiles, y):
+def graph_from_smiles_y(x_smiles: list, y) -> list:
     """
     Inputs:
     x_smiles = [smiles_1, smiles_2, ....] ... a list of SMILES strings
@@ -104,13 +104,9 @@ def graph_from_smiles_y(x_smiles, y):
 
     return data_list
 
-def bare_graph_from_smiles(x_smiles):
+def bare_graph_from_smiles(x_smiles: list) -> list:
     """
-    Inputs:
-    x_smiles = [smiles_1, smiles_2, ....] ... a list of SMILES strings
-
-    Outputs:
-    data_list = [G_1, G_2, ...] ... a list of torch_geometric.data.Data objects which represent labeled molecular graphs that can readily be used for machine learning
+    Creates graph from smiles string with only atom type one-hot-encoding
     """
 
     permitted_list_of_atoms = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B', 'Si', 'Sn']
@@ -160,3 +156,52 @@ def bare_graph_from_smiles(x_smiles):
         data_list.append(torch_geometric.data.Data(x=X, edge_index=E, edge_attr=EF))
 
     return data_list
+
+def single_bare_graph_from_smiles(smiles: str) -> torch_geometric.data.Data:
+    """
+    Creates one graph from one smiles string with only atom type one-hot-encoding
+    """
+
+    permitted_list_of_atoms = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B', 'Si', 'Sn']
+    permitted_list_of_bond_types = [Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.DOUBLE,
+                                    Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.AROMATIC]
+
+
+
+    # convert SMILES to RDKit mol object
+    # print(i)
+    mol = Chem.MolFromSmiles(smiles)
+
+    # get feature dimensions
+    n_nodes = mol.GetNumAtoms()
+    n_edges = 2 * mol.GetNumBonds()
+    unrelated_smiles = "O=O"
+    unrelated_mol = Chem.MolFromSmiles(unrelated_smiles)
+    n_node_features = len(one_hot_encoding(str(unrelated_mol.GetAtomWithIdx(0).GetSymbol()), permitted_list_of_atoms))
+
+    n_edge_features = len(np.array(one_hot_encoding(unrelated_mol.GetBondBetweenAtoms(0, 1).GetBondType(), permitted_list_of_bond_types)))
+
+    # construct node feature matrix X of shape (n_nodes, n_node_features)
+    X = np.zeros((n_nodes, n_node_features))
+
+    for atom in mol.GetAtoms():
+        X[atom.GetIdx(), :] = one_hot_encoding(atom.GetSymbol(), permitted_list_of_atoms)
+
+    X = torch.tensor(X, dtype=torch.float)
+
+    # construct edge index array E of shape (2, n_edges)
+    (rows, cols) = np.nonzero(Chem.GetAdjacencyMatrix(mol))
+    torch_rows = torch.from_numpy(rows.astype(np.int64)).to(torch.long)
+    torch_cols = torch.from_numpy(cols.astype(np.int64)).to(torch.long)
+    E = torch.stack([torch_rows, torch_cols], dim=0)
+
+    # construct edge feature array EF of shape (n_edges, n_edge_features)
+    EF = np.zeros((n_edges, n_edge_features))
+
+    for (k, (i, j)) in enumerate(zip(rows, cols)):
+        EF[k] = one_hot_encoding(mol.GetBondBetweenAtoms(int(i), int(j)).GetBondType(), permitted_list_of_bond_types)
+
+    EF = torch.tensor(EF, dtype=torch.float)
+
+    # construct Pytorch Geometric data object
+    return torch_geometric.data.Data(x=X, edge_index=E, edge_attr=EF)

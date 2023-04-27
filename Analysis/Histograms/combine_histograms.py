@@ -17,27 +17,25 @@ def combine_hists(hist1, hist2, name):
             idx = np.where(hist1[0] == value)[0][0] # Get index in hist1 where the value is found
             hist1[1][idx] += hist2[1][i] # Update hist1
         else:
-
             hist1 = np.array([hist1[0].tolist() + [value], hist1[1].tolist() + [hist2[1][i]]])
-
     return hist1
 
 # Combined set
-element_type = np.load(f"Histograms/Combined/element_type.npy", allow_pickle=True)
-num_heavy_atom_neighbors = np.load(f"Histograms/Combined/num_heavy_atom_neighbors.npy", allow_pickle=True)
-num_h_neighbors = np.load(f"Histograms/Combined/num_h_neighbors.npy", allow_pickle=True)
-formal_charge = np.load(f"Histograms/Combined/formal_charge.npy", allow_pickle=True)
-in_a_ring = np.load(f"Histograms/Combined/in_a_ring.npy", allow_pickle=True)
-is_aromatic = np.load(f"Histograms/Combined/is_aromatic.npy", allow_pickle=True)
+element_type = np.load(f"Combined/element_type.npy", allow_pickle=True)
+num_heavy_atom_neighbors = np.load(f"Combined/num_heavy_atom_neighbors.npy", allow_pickle=True)
+num_h_neighbors = np.load(f"Combined/num_h_neighbors.npy", allow_pickle=True)
+formal_charge = np.load(f"Combined/formal_charge.npy", allow_pickle=True)
+in_a_ring = np.load(f"Combined/in_a_ring.npy", allow_pickle=True)
+is_aromatic = np.load(f"Combined/is_aromatic.npy", allow_pickle=True)
 
-bond_type = np.load(f"Histograms/Combined/bond_type.npy", allow_pickle=True)
+bond_type = np.load(f"Combined/bond_type.npy", allow_pickle=True)
 
-num_heavy_atoms = np.load(f"Histograms/Combined/num_heavy_atoms.npy", allow_pickle=True)
-total_num_atoms = np.load(f"Histograms/Combined/total_num_atoms.npy", allow_pickle=True)
-molecular_weight = np.load(f"Histograms/Combined/molecular_weight.npy", allow_pickle=True)
+num_heavy_atoms = np.load(f"Combined/num_heavy_atoms.npy", allow_pickle=True)
+total_num_atoms = np.load(f"Combined/total_num_atoms.npy", allow_pickle=True)
+molecular_weight = np.load(f"Combined/molecular_weight.npy", allow_pickle=True)
 
-sas = np.load(f"Histograms/Combined/sas.npy", allow_pickle=True)
-qed = np.load(f"Histograms/Combined/qed.npy", allow_pickle=True)
+sas = np.load(f"Combined/sas.npy", allow_pickle=True)
+qed = np.load(f"Combined/qed.npy", allow_pickle=True)
 
 # Uncombined set
 # 2
