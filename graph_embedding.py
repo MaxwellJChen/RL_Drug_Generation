@@ -162,7 +162,7 @@ def single_bare_graph_from_smiles(smiles: str) -> torch_geometric.data.Data:
     Creates one graph from one smiles string with only atom type one-hot-encoding
     """
 
-    permitted_list_of_atoms = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B', 'Si', 'Sn']
+    permitted_list_of_atoms = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B', 'Si']
     permitted_list_of_bond_types = [Chem.rdchem.BondType.SINGLE, Chem.rdchem.BondType.DOUBLE,
                                     Chem.rdchem.BondType.TRIPLE, Chem.rdchem.BondType.AROMATIC]
 
