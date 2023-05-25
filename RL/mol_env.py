@@ -2,6 +2,8 @@ import rdkit.Chem as Chem
 from rdkit.Chem import RWMol
 from rdkit.Chem import Draw
 
+import graph_embedding as GE
+
 # QED
 import rdkit.Chem.QED as QED
 
@@ -16,7 +18,7 @@ import matplotlib.pyplot as plt
 import copy
 
 class Mol_Env():
-    def __init__(self, max_mol_size):
+    def __init__(self, max_mol_size, max_steps):
         self.state = RWMol()
         self.mol_size = self.state.GetNumHeavyAtoms()  # The number of heavy atoms in the current molecule
 
@@ -26,6 +28,10 @@ class Mol_Env():
         self.max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
 
         self.max_mol_size = max_mol_size
+
+        self.timestep = 0
+        self.max_steps = max_steps
+
         pass
 
     def _reward(self):
@@ -61,9 +67,9 @@ class Mol_Env():
         :return: True if the action is invalid and False if action is valid
         """
 
-        if atom1 == atom2: # Can't form a bond with the same atom
+        if atom1 == atom2: # Can not form a bond with the same atom
             return True
-        # Can't form a bond between atoms which already have a bond
+        # Can not form a bond between atoms which already have a bond
         elif atom2 < self.mol_size and self.state.GetBondBetweenAtoms(atom1, atom2) is not None:
             return True
         else:
@@ -113,16 +119,12 @@ class Mol_Env():
                 if min(proposed_ring_sizes) < 3 or max(proposed_ring_sizes) > 7:
                     return True
 
-        # # Proposed state should pass sanitization
-        # if Chem.SanitizeMol(proposed_state): # SanitizeMol() returns 0 (False) if sanitization is successful
-        #     return True
-
         return False
 
     def reset(self, smiles = 'C'):
         """
         Resets the environment to an initial state with a single random atom
-        :return: initial state, info
+        :return: initial state, info (invalid, timestep)
         """
         # atom = Chem.Atom(random.choice(self.atom_bank)) # Resets to a random atom in atom_bank
 
@@ -131,24 +133,14 @@ class Mol_Env():
             atom = Chem.Atom(smiles)
             self.state.AddAtom(atom)
         else:
+            # mol = Chem.MolFromSmiles('Cn1cnc2n(C)c(=O)n(C)c(=O)c12') # Caffeine molecule
             mol = Chem.MolFromSmiles(smiles)
             self.state = RWMol(mol)
         self.mol_size = self.state.GetNumHeavyAtoms()
 
-        return self.state
+        info = (self.timestep, False)
 
-    def visualize(self):
-        """
-        Visualize the current state
-        """
-        # self.state = Chem.MolFromSmiles("Cn1cnc2n(C)c(=O)n(C)c(=O)c12")
-        state_copy = copy.copy(self.state)
-        for atom in state_copy.GetAtoms():
-            atom.SetProp("molAtomMapNumber", str(atom.GetIdx()))
-        img = Draw.MolToImage(state_copy)
-        plt.imshow(img)
-        plt.axis('off')
-        plt.show()
+        return self.state, info
 
     def step(self, terminate, atom1, atom2, bond):
         """
@@ -160,17 +152,22 @@ class Mol_Env():
         :return: new state, reward, terminate/truncated, info
         """
 
+        self.timestep += 1
+        invalid = self._validate_action(atom1, atom2, bond) # True if the proposed action is invalid
+        info = (self.timestep, invalid)
+
+        truncated = False
+        terminated = False
+
+        reward = self._reward()
+
         if terminate == 1: # Model decides to stop adding on to molecule
-            return self.state, self._reward(), True, False
-
-        elif self.state.GetNumHeavyAtoms() == self.max_mol_size: # The size of the molecule hits the limit
-            return self.state, self._reward(), False, True
-
+            terminated = True
+        elif self.state.GetNumHeavyAtoms() == self.max_mol_size or self.timestep == self.max_steps: # The size of the molecule hits the limit
+            truncated = True
         else: # No truncating or terminating
-            invalid_action = self._validate_action(atom1, atom2, bond)
-            if invalid_action: # If the action is invalid, return the current state again with -0.5 as reward
-                return self.state, -0.5, False, False
-
+            if invalid: # If the action is invalid, return the current state again with -0.5 as reward
+                reward = -0.5
             else: # If the action is valid, update RWMol accordingly
                 self.state = self._update_state(atom1, atom2, bond)
 
@@ -179,23 +176,42 @@ class Mol_Env():
         self.state.UpdatePropertyCache()
         Chem.SanitizeMol(self.state, catchErrors = True)
 
-        return self.state, self._reward(), False, False
+        return self.state, reward, terminated, truncated, info
 
-env = Mol_Env(50)
-print("Reset")
-env.reset('CCCCC')
-env.visualize()
-print()
+        def visualize(self, invalid=False, timestep=True):
+            """
+            Visualize the current state
+            """
 
-print("Add carbon")
-print(env.step(0, 0, 5, 0))
-print(Chem.MolToSmiles(env.state))
-env.visualize()
-print()
+            if not invalid:
+                # self.state = Chem.MolFromSmiles("Cn1cnc2n(C)c(=O)n(C)c(=O)c12") # Caffeine drawing
+                state_copy = copy.copy(self.state)
+                for atom in state_copy.GetAtoms():
+                    atom.SetProp("molAtomMapNumber", str(atom.GetIdx()))
+                img = Draw.MolToImage(state_copy)
+                plt.imshow(img)
+                plt.axis('off')
+                if timestep:
+                    plt.text(x=0, y=1, s=f"Timestep: {self.timestep}", size='large', transform=plt.gca().transAxes)
+                plt.show()
+            else:
+                pass
 
-print("Create erroneous bond")
-print(env.step(0, 4, 5, 0))
-print(Chem.MolToSmiles(env.state))
-env.visualize()
-
-print(len(env.state.GetRingInfo().AtomRings()))
+# env = Mol_Env(50)
+# print("Reset")
+# env.reset('CCCCC')
+# env.visualize()
+# print()
+#
+# print("Add carbon")
+# print(env.step(0, 0, 5, 0))
+# print(Chem.MolToSmiles(env.state))
+# env.visualize()
+# print()
+#
+# print("Create erroneous bond")
+# print(env.step(0, 4, 5, 0))
+# print(Chem.MolToSmiles(env.state))
+# env.visualize()
+#
+# print(len(env.state.GetRingInfo().AtomRings()))
