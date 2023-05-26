@@ -67,67 +67,57 @@ class Policy(nn.Module):
 
         return t, n, b
 
-    def act(self, state):
+    def act(self, batch):
         """
-        Accepts a batch of states. Outputs a list of actions for each state in batch.
+        Accepts a batch of graphs. Outputs a list of actions for each state in batch alongside with log probability.
         """
 
-        # Sample nodes for each example in batch
-        t, n, b = self.forward(state)
+        t, n, b = self.forward(batch.x, batch.edge_index, batch.batch) # Generate probability distributions for each action
+
+        # Termination
         t = Categorical(t)
+        t_act = t.sample()
+        t_log_prob = t.log_prob(t_act)
 
+        n1_act = 0
+        n1_log_prob = 0
+        n2_act = 0
+        n2_log_prob = 0
+        # Select two atoms: one from the original molecule and another from the every possible atom.
+        state_idx, num_nodes = torch.unique(batch.batch, return_counts = True)
+        for i in range(len(num_nodes)):
+            # Select first atom from existing molecule
+            full_idx = sum(num_nodes[:i+1]) # The length of the entire molecule and the atom bank
+            prev_idx = sum(num_nodes[:i])
 
-    #     selected_idx = []
-    #     for i in range(len(num_nodes)):
-    #         # Select first atom from existing molecule
-    #         full_idx = sum(num_nodes[:i+1]) # The length of the entire molecule and the atom bank
-    #         prev_idx = sum(num_nodes[:i])
-    #
-    #         prob_molecule = n[prev_idx:full_idx-10].view(-1)
-    #         prob_molecule = prob_molecule.softmax(dim = 0)
-    #         c_molecule = Categorical(prob_molecule)
-    #         i_molecule = int(c_molecule.sample())
-    #
-    #         # Create new categorical distribution without i_molecule that includes atom bank
-    #         prob_full = n[prev_idx:full_idx].view(-1)
-    #         prob_full = torch.cat((prob_full[:i_molecule], prob_full[i_molecule + 1:])) # Removing i_molecule with indexing
-    #         prob_full = prob_full.softmax(dim = 0)
-    #         c_full = Categorical(prob_full)
-    #         i_full = int(c_full.sample())
-    #
-    #         # Updating indices to apply to stack
-    #         i_molecule += prev_idx
-    #         i_full += prev_idx
-    #
-    #         if i_full > i_molecule:
-    #             selected_idx.append([i_molecule, i_full])
-    #         else:
-    #             selected_idx.append([i_full, i_molecule])
-    #
-    #     # Combine selected node embeddings
-    #     selected_nodes = torch.empty([len(num_nodes), 128])
-    #     for i in range(len(selected_idx)):
-    #         selected_nodes[i] = torch.hstack((stack[selected_idx[i][0]], stack[selected_idx[i][1]]))
+            prob_molecule = n[prev_idx:full_idx-10].view(-1)
+            prob_molecule = prob_molecule.softmax(dim = 0)
+            c_molecule = Categorical(prob_molecule)
+            i_molecule = c_molecule.sample()
+            i_molecule_log_prob = c_molecule.log_prob(i_molecule)
 
+            # Create new categorical distribution without i_molecule that includes atom bank
+            prob_full = n[prev_idx:full_idx].view(-1)
+            prob_full = torch.cat((prob_full[:i_molecule], prob_full[i_molecule + 1:])) # Removing i_molecule with indexing
+            prob_full = prob_full.softmax(dim = 0)
+            c_full = Categorical(prob_full)
+            i_full = c_full.sample()
+            i_full_log_prob = c_full.log_prob(i_full)
 
-"""
-Caffeine: Cn1cnc2n(C)c(=O)n(C)c(=O)c12
-Ibuprofen: CC(C)CC1=CC=C(C=C1)C(C)C(=O)O
-Benzene: c1ccccc1
-"""
+            if i_full > i_molecule:
+                n1_act = i_molecule
+                n2_act = i_full
+                n1_log_prob = i_molecule_log_prob
+                n2_log_prob = i_full_log_prob
+            else:
+                n2_act = i_molecule
+                n1_act = i_full
+                n2_log_prob = i_molecule_log_prob
+                n1_log_prob = i_full_log_prob
 
-smiles = ["Cn1cnc2n(C)c(=O)n(C)c(=O)c12", "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O", "c1ccccc1"]
-data_list = graph_embedding.graph_from_smiles_atom_bank(smiles)
-batch = torch_geometric.data.Batch.from_data_list(data_list)
+        # Bond
+        b = Categorical(b)
+        b_act = b.sample()
+        b_log_prob = b.log_prob(b_act)
 
-policy = Policy(batch.num_node_features)
-t, n, b = policy(batch.x, batch.edge_index, batch.batch)
-print(n.shape)
-
-# x_smiles =
-# data_list, num_nodes = ge.graph_from_smiles_atom_bank_with_list(["Cn1cnc2n(C)c(=O)n(C)c(=O)c12"])
-# data_list = torch_geometric.data.Batch.from_data_list(data_list)
-#
-# policy = Policy(data_list.num_node_features)
-# t, n, b = policy(data_list.x, data_list.edge_index, num_nodes, data_list.batch)
-# print(n)
+        return int(t_act[0]), t_log_prob, int(n1_act), n1_log_prob, int(n2_act), n2_log_prob, int(b_act[0]), b_log_prob

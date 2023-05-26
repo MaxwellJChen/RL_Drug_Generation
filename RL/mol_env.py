@@ -14,8 +14,11 @@ import sys
 sys.path.append(os.path.join(RDConfig.RDContribDir, 'SA_Score'))
 import sascorer
 
-import matplotlib.pyplot as plt
 import copy
+
+# Visualize
+import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw, ImageFont
 
 class Mol_Env():
     def __init__(self, max_mol_size, max_steps):
@@ -159,16 +162,14 @@ class Mol_Env():
         truncated = False
         terminated = False
 
-        reward = self._reward()
+        reward = 0 # If the action is invalid, return the current state again with -0.5 as reward
 
         if terminate == 1: # Model decides to stop adding on to molecule
             terminated = True
         elif self.state.GetNumHeavyAtoms() == self.max_mol_size or self.timestep == self.max_steps: # The size of the molecule hits the limit
             truncated = True
         else: # No truncating or terminating
-            if invalid: # If the action is invalid, return the current state again with -0.5 as reward
-                reward = -0.5
-            else: # If the action is valid, update RWMol accordingly
+            if not invalid: # If the action is valid, update RWMol accordingly
                 self.state = self._update_state(atom1, atom2, bond)
 
         self.mol_size = self.state.GetNumHeavyAtoms()
@@ -176,42 +177,26 @@ class Mol_Env():
         self.state.UpdatePropertyCache()
         Chem.SanitizeMol(self.state, catchErrors = True)
 
-        return self.state, reward, terminated, truncated, info
+        return self.state, self._reward(), terminated, truncated, info
 
-        def visualize(self, invalid=False, timestep=True):
-            """
-            Visualize the current state
-            """
+    def visualize(self, return_image=False):
+        """
+        Visualize the current state.
+        """
 
-            if not invalid:
-                # self.state = Chem.MolFromSmiles("Cn1cnc2n(C)c(=O)n(C)c(=O)c12") # Caffeine drawing
-                state_copy = copy.copy(self.state)
-                for atom in state_copy.GetAtoms():
-                    atom.SetProp("molAtomMapNumber", str(atom.GetIdx()))
-                img = Draw.MolToImage(state_copy)
-                plt.imshow(img)
-                plt.axis('off')
-                if timestep:
-                    plt.text(x=0, y=1, s=f"Timestep: {self.timestep}", size='large', transform=plt.gca().transAxes)
-                plt.show()
-            else:
-                pass
+        # Generate image
+        state_copy = copy.copy(self.state)
+        for atom in state_copy.GetAtoms():
+            atom.SetProp("molAtomMapNumber", str(atom.GetIdx()))
+        img = Draw.MolToImage(state_copy)
 
-# env = Mol_Env(50)
-# print("Reset")
-# env.reset('CCCCC')
-# env.visualize()
-# print()
-#
-# print("Add carbon")
-# print(env.step(0, 0, 5, 0))
-# print(Chem.MolToSmiles(env.state))
-# env.visualize()
-# print()
-#
-# print("Create erroneous bond")
-# print(env.step(0, 4, 5, 0))
-# print(Chem.MolToSmiles(env.state))
-# env.visualize()
-#
-# print(len(env.state.GetRingInfo().AtomRings()))
+        # Return a single frame as a gif
+        if return_image:
+            return img
+
+        # Display image with matplotlib
+        else:
+            plt.imshow(img)
+            plt.axis('off')
+            plt.text(x=0, y=1, s=f"Timestep: {self.timestep}", size='large', transform=plt.gca().transAxes)
+            plt.show()
