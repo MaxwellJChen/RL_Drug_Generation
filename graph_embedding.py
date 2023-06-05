@@ -69,13 +69,9 @@ def get_bond_features(bond):
     bond_feature_vector = one_hot_encoding(bond.GetBondType(), permitted_list_of_bond_types)
     return np.array(bond_feature_vector)
 
-def single_graph_from_smiles_atom_bank(smiles):
+def batch_from_smiles(all_smiles):
     """
-    Inputs:
-    x_smiles = [smiles_1, smiles_2, ....] ... a list of SMILES strings
-
-    Outputs:
-    data_list = [G_1, G_2, ...] ... a list of torch_geometric.data.Data objects which represent labeled molecular graphs that can readily be used for machine learning
+    Accepts list of SMILES strings. Outputs a batch of embedded SMILES with atom bank.
     """
 
     data_list = []
@@ -93,69 +89,7 @@ def single_graph_from_smiles_atom_bank(smiles):
         [0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.]]
     )
 
-
-    # convert SMILES to RDKit mol object
-    # print(i)
-    mol = Chem.MolFromSmiles(smiles)
-
-    # get feature dimensions
-    n_nodes = mol.GetNumAtoms()
-    n_edges = 2 * mol.GetNumBonds()
-    unrelated_smiles = "O=O"
-    unrelated_mol = Chem.MolFromSmiles(unrelated_smiles)
-    n_node_features = len(get_atom_features(unrelated_mol.GetAtomWithIdx(0)))
-    n_edge_features = len(get_bond_features(unrelated_mol.GetBondBetweenAtoms(0, 1)))
-
-    # construct node feature matrix X of shape (n_nodes, n_node_features)
-    X = np.zeros((n_nodes, n_node_features))
-
-    for atom in mol.GetAtoms():
-        X[atom.GetIdx(), :] = get_atom_features(atom)
-
-    X = torch.tensor(X, dtype=torch.float)
-    X = torch.vstack((X, atom_bank))
-
-    # construct edge index array E of shape (2, n_edges)
-    (rows, cols) = np.nonzero(Chem.GetAdjacencyMatrix(mol))
-    torch_rows = torch.from_numpy(rows.astype(np.int64)).to(torch.long)
-    torch_cols = torch.from_numpy(cols.astype(np.int64)).to(torch.long)
-    E = torch.stack([torch_rows, torch_cols], dim=0)
-
-    # construct edge feature array EF of shape (n_edges, n_edge_features)
-    EF = np.zeros((n_edges, n_edge_features))
-
-    for (k, (i, j)) in enumerate(zip(rows, cols)):
-        EF[k] = get_bond_features(mol.GetBondBetweenAtoms(int(i), int(j)))
-
-    EF = torch.tensor(EF, dtype=torch.float)
-
-    return torch_geometric.data.Data(x=X, edge_index=E, edge_attr=EF)
-
-def graph_from_smiles_atom_bank(x_smiles):
-    """
-    Inputs:
-    x_smiles = [smiles_1, smiles_2, ....] ... a list of SMILES strings
-
-    Outputs:
-    data_list = [G_1, G_2, ...] ... a list of torch_geometric.data.Data objects which represent labeled molecular graphs that can readily be used for machine learning
-    """
-
-    data_list = []
-
-    atom_bank = torch.FloatTensor(
-        [[1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
-        [0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
-        [0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
-        [0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
-        [0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
-        [0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
-        [0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
-        [0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
-        [0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
-        [0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.]]
-    )
-
-    for i, smiles in enumerate(x_smiles):
+    for i, smiles in enumerate(all_smiles):
 
         # convert SMILES to RDKit mol object
         # print(i)
@@ -195,4 +129,13 @@ def graph_from_smiles_atom_bank(x_smiles):
         # construct Pytorch Geometric data object and append to data list
         data_list.append(torch_geometric.data.Data(x=X, edge_index=E, edge_attr=EF))
 
-    return data_list
+    batch = torch_geometric.data.Batch.from_data_list(data_list)
+
+    return batch
+
+def batch_from_states(states):
+    """
+    Accepts a list of RWMol objects. Outputs a batch of embedded graphs with atom bank.
+    """
+    smiles = [Chem.MolToSmiles(state) for state in states]
+    return batch_from_smiles(smiles)

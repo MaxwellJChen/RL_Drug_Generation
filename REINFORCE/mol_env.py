@@ -1,18 +1,15 @@
+# RDKit
 import rdkit.Chem as Chem
 from rdkit.Chem import RWMol
 from rdkit.Chem import Draw
-
-import graph_embedding as GE
-
-# QED
-import rdkit.Chem.QED as QED
-
-# SAS
-from rdkit.Chem import RDConfig
+import rdkit.Chem.QED as QED # QED
+from rdkit.Chem import RDConfig # SAS
 import os
 import sys
 sys.path.append(os.path.join(RDConfig.RDContribDir, 'SA_Score'))
 import sascorer
+
+import graph_embedding as GE
 
 import copy
 
@@ -20,22 +17,27 @@ import copy
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 
-class Mol_Env():
-    def __init__(self, max_mol_size, max_steps):
+import gymnasium as gym
+from gymnasium import spaces
+
+class single_mol_env():
+    """
+    Unvectorized environment
+    """
+
+    def __init__(self, max_mol_size, max_steps, render_mode = None):
         self.state = RWMol()
         self.mol_size = self.state.GetNumHeavyAtoms()  # The number of heavy atoms in the current molecule
 
         self.atom_bank = [Chem.Atom(symbol) for symbol in ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']]
         self.bond_bank = [Chem.BondType.SINGLE, Chem.BondType.DOUBLE, Chem.BondType.TRIPLE]
 
-        self.max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
+        self.max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 2, 'F': 1, 'Cl': 1, 'P': 3, 'Br': 1, 'I': 1, 'B': 3}
 
         self.max_mol_size = max_mol_size
 
         self.timestep = 0
         self.max_steps = max_steps
-
-        pass
 
     def _reward(self):
         """
@@ -45,8 +47,7 @@ class Mol_Env():
         qed = QED.weights_mean(self.state) # From 0 to 1 where 1 is the most drug-like
         sas = sascorer.calculateScore(self.state) # From 1 to 10 where 1 is easiest to synthesize
 
-        reward = (qed + (1-(sas-1)/9))*0.5 # QED and SAS are weighed equally
-        # print(f'QED: {qed}, SAS: {sas}')
+        reward = qed*0.75 + (1-(sas-1)/9)*0.25 # QED and SAS are weighed equally
 
         return reward
 
@@ -126,12 +127,13 @@ class Mol_Env():
 
     def reset(self, smiles = 'C'):
         """
-        Resets the environment to an initial state with a single random atom
-        :return: initial state, info (invalid, timestep)
+        Resets the environment to an initial state
+        :return: initial state, info (timestep, invalid)
         """
         # atom = Chem.Atom(random.choice(self.atom_bank)) # Resets to a random atom in atom_bank
 
         # Resets to a molecule of choice (defaults to carbon atom)
+        self.state = RWMol()
         if smiles == 'C':
             atom = Chem.Atom(smiles)
             self.state.AddAtom(atom)
@@ -140,6 +142,7 @@ class Mol_Env():
             mol = Chem.MolFromSmiles(smiles)
             self.state = RWMol(mol)
         self.mol_size = self.state.GetNumHeavyAtoms()
+        self.timestep = 0
 
         info = (self.timestep, False)
 
@@ -149,8 +152,8 @@ class Mol_Env():
         """
         The step function of the Mol_Env class
         :param terminate: either 0 (continue) or 1 (terminate)
-        :param atom1: index of first atom from 0 to N where N is the total number of atoms
-        :param atom2: index of second atom from 0 to N where atom1 < atom2
+        :param atom1: index of first atom from 0 to n where n is the number of atoms in the molecule
+        :param atom2: index of second atom from 0 to n + 10 (atoms in molecule + atoms in node bank) where atom1 < atom2
         :param bond: a number from 0 to 2 indicating the 3 possible bond types to add (aromatic bonds calculated later)
         :return: new state, reward, terminate/truncated, info
         """
@@ -162,7 +165,7 @@ class Mol_Env():
         truncated = False
         terminated = False
 
-        reward = 0 # If the action is invalid, return the current state again with -0.5 as reward
+        reward = -0.5 # If the action is invalid, return the current state again with -0.5 as reward
 
         if terminate == 1: # Model decides to stop adding on to molecule
             terminated = True
@@ -171,13 +174,12 @@ class Mol_Env():
         else: # No truncating or terminating
             if not invalid: # If the action is valid, update RWMol accordingly
                 self.state = self._update_state(atom1, atom2, bond)
+                self.state.UpdatePropertyCache()
+                Chem.SanitizeMol(self.state, catchErrors=True)
+                self.mol_size = self.state.GetNumHeavyAtoms()
+                reward = self._reward()
 
-        self.mol_size = self.state.GetNumHeavyAtoms()
-
-        self.state.UpdatePropertyCache()
-        Chem.SanitizeMol(self.state, catchErrors = True)
-
-        return self.state, self._reward(), terminated, truncated, info
+        return self.state, reward, terminated, truncated, info
 
     def visualize(self, return_image=False):
         """

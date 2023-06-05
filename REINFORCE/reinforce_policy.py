@@ -13,9 +13,13 @@ import rdkit.Chem as Chem
 import numpy as np
 import random
 
-class Policy(nn.Module):
+class reinforce_policy(nn.Module):
+    """
+    Policy network for reinforce training
+    """
+
     def __init__(self, num_node_features, global_vector_dim = 32):
-        super(Policy, self).__init__()
+        super(reinforce_policy, self).__init__()
         # Global embedder
         self.conv1 = GCNConv(num_node_features, 32)
         self.conv2 = GCNConv(32, 24)
@@ -31,6 +35,10 @@ class Policy(nn.Module):
         # Bond predictor
         self.b_fcn1 = nn.Linear(24, 16)
         self.b_fcn2 = nn.Linear(16, 3)
+
+        # Make weight initialization orthogonal
+
+        # Initialize policy output layer weights with a scale of 0.01
 
     def forward(self, x, edge_index, batch):
         """
@@ -48,7 +56,7 @@ class Policy(nn.Module):
         g = self.g_fcn1(g)
 
         # Termination prediction
-        t = self.t_fcn1(g)
+        t = self.t_fcn1(g) # Logits
         t = t.softmax(dim = 1) # Probability distribution of termination for each molecule in batch
 
         # Atom prediction
