@@ -112,7 +112,8 @@ class reinforce_policy(nn.Module):
             i_full = c_full.sample()
             i_full_log_prob = c_full.log_prob(i_full)
 
-            if i_full > i_molecule:
+            if i_full >= i_molecule:
+                i_full += 1
                 n1_act = i_molecule
                 n2_act = i_full
                 n1_log_prob = i_molecule_log_prob
