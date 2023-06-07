@@ -121,6 +121,8 @@ def rollout_mol(mol):
             bond.append(int(mol.GetBondBetweenAtoms(int(idx), int(order[i + 1])).GetBondType()))
             # draw_mol(state)
 
+    terminate[-1] = 1
+
     return terminate, atom1, atom2, bond, states
 
 mol = Chem.MolFromSmiles('Cn1cnc2n(C)c(=O)n(C)c(=O)c12') # Caffeine molecule

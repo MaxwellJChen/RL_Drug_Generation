@@ -12,6 +12,9 @@ import rdkit.Chem as Chem
 
 import numpy as np
 import random
+import copy
+
+torch.manual_seed(42)
 
 def _fcn_init(fcn_layer, std = np.sqrt(2), bias_const = 0.0):
     """
@@ -99,15 +102,20 @@ class ppo_policy(nn.Module):
         t_log_prob = t.log_prob(t_act)
         t_entropy = t.entropy()
 
+        # Record processed actions to send directly to environment
         n1_act = []
-        n1_log_prob = []
-        n1_entropy = []
         n2_act = []
-        n2_log_prob = []
-        n2_entropy = []
+
+        # Record the outputs of the categorical distributions
+        nmol_act = []
+        nmol_log_prob = []
+        nmol_entropy = []
+        nfull_act = []
+        nfull_log_prob = []
+        nfull_entropy= []
         # Select two atoms: one from the original molecule and another from the every possible atom.
         state_idx, num_nodes = torch.unique(batch.batch, return_counts=True)
-        for i in range(len(num_nodes)):
+        for i in range(len(num_nodes)): # Iterates through each graph in batch
             # Select first atom from existing molecule
             full_idx = sum(num_nodes[:i + 1])  # The length of the entire molecule and the atom bank
             prev_idx = sum(num_nodes[:i])
@@ -118,32 +126,28 @@ class ppo_policy(nn.Module):
             i_molecule = c_molecule.sample()
             i_molecule_log_prob = c_molecule.log_prob(i_molecule)
             i_molecule_entropy = c_molecule.entropy()
+            nmol_act.append(i_molecule)
+            nmol_log_prob.append(i_molecule_log_prob)
+            nmol_entropy.append(i_molecule_entropy)
 
             # Create new categorical distribution that includes atom bank
             prob_full = n[prev_idx:full_idx].view(-1)
-            prob_full = torch.cat(
-                (prob_full[:i_molecule], prob_full[i_molecule + 1:]))  # Removing i_molecule with indexing
+            prob_full = torch.cat((prob_full[:i_molecule], prob_full[i_molecule + 1:]))  # Removing i_molecule with indexing
             prob_full = prob_full.softmax(dim=0)
             c_full = Categorical(prob_full)
             i_full = c_full.sample()
             i_full_log_prob = c_full.log_prob(i_full)
             i_full_entropy = c_full.entropy()
+            nfull_act.append(i_full)
+            nfull_log_prob.append(i_full_log_prob)
+            nfull_entropy.append(i_full_entropy)
 
             if i_full >= i_molecule:
-                i_full += 1 # Update i_full to account for i_molecule node being removed
                 n1_act.append(i_molecule)
-                n2_act.append(i_full)
-                n1_log_prob.append(i_molecule_log_prob)
-                n2_log_prob.append(i_full_log_prob)
-                n1_entropy.append(i_molecule_entropy)
-                n2_entropy.append(i_full_entropy)
+                n2_act.append(i_full + 1) # Update i_full to account for i_molecule node being removed
             else:
                 n2_act.append(i_molecule)
                 n1_act.append(i_full)
-                n2_log_prob.append(i_molecule_log_prob)
-                n1_log_prob.append(i_full_log_prob)
-                n2_entropy.append(i_molecule_entropy)
-                n1_entropy.append(i_full_entropy)
 
         # Bond
         b = Categorical(b)
@@ -156,8 +160,4 @@ class ppo_policy(nn.Module):
         n2_act = [int(a2) for a2 in n2_act]
         b_act = [int(b) for b in list(b_act)]
 
-        actions = (t_act, n1_act, n2_act, b_act)
-        log_probs = [t_log_prob, n1_log_prob, n2_log_prob, b_log_prob]
-        entropies = [t_entropy, n1_entropy, n2_entropy, b_entropy]
-
-        return actions, log_probs, entropies # Return list of actions, log probabilities, and entropies
+        return t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy
