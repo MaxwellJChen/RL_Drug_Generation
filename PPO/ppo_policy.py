@@ -95,7 +95,7 @@ class ppo_policy(nn.Module):
 
         return t, n, b
 
-    def act(self, batch, mol_env):
+    def act(self, batch, mol_env, return_masks = False):
         """
         Accepts a batch of graphs. Outputs a list of actions for each state in batch alongside with log probability.
         """
@@ -120,6 +120,12 @@ class ppo_policy(nn.Module):
         nfull_act = []
         nfull_log_prob = []
         nfull_entropy= []
+
+        # Record the masks applied for training PPO
+        nmol_masks = []
+        nfull_masks = []
+        b_masks = []
+
         # Select two atoms: one from the original molecule and another from the every possible atom.
         state_idx, num_nodes = torch.unique(batch.batch, return_counts=True)
         for i in range(len(num_nodes)): # Iterates through each graph in batch
@@ -182,6 +188,10 @@ class ppo_policy(nn.Module):
                 n2_act.append(i_molecule)
                 n1_act.append(i_full)
 
+            if return_masks:
+                nmol_masks.append(prob_mol_mask)
+                nfull_masks.append(prob_full_mask)
+
         # Bond
         # Invalid action masking for bond
         atoms = [atom for atom in mol_env.state.GetAtoms()]
@@ -198,6 +208,8 @@ class ppo_policy(nn.Module):
         bond_mask = [idx for idx in bond_mask if idx not in allowed_bonds]
         for idx in bond_mask:
             b[0][idx] = float('-inf')
+        if return_masks:
+            b_masks.append(bond_mask)
 
         b = b.softmax(dim = 1)
         b = Categorical(b)
@@ -210,4 +222,7 @@ class ppo_policy(nn.Module):
         n2_act = [int(a2) for a2 in n2_act]
         b_act = [int(b) for b in list(b_act)]
 
-        return t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy
+        if return_masks:
+            return t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nmol_masks, nfull_act, nfull_log_prob, nfull_entropy, nfull_masks, b_act, b_log_prob, b_entropy, b_masks
+        else:
+            return t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy

@@ -3,7 +3,7 @@ import numpy as np
 from ppo_policy import ppo_policy
 from mol_env import single_mol_env
 
-from graph_embedding import batch_from_states, batch_from_smiles
+from graph_embedding import batch_from_states, batch_from_smiles, draw_mol
 
 import torch
 from torch.distributions.categorical import Categorical
@@ -17,6 +17,8 @@ import rdkit.Chem.Draw as Draw
 Proximal Policy Optimization with reference to https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/, https://www.youtube.com/watch?v=HR8kQMTO8bk&t=5s, and https://colab.research.google.com/drive/1MsRlEWRAk712AQPmoM9X9E6bNeHULRDb?usp=sharing
 """
 
+torch.autograd.set_detect_anomaly(True)
+
 mol_env = single_mol_env(max_mol_size = 10, max_steps = 100)
 obs, info = mol_env.reset()
 initial_batch = batch_from_states([obs])
@@ -29,6 +31,8 @@ num_episodes = 100
 num_rollout_steps = 100
 max_iters = 100
 for episode in range(num_episodes): # How many times to execute rollout
+    print(f'EPISODE {episode + 1}')
+
     # Learning rate annealing
     frac = 1.0 - (episode) / num_episodes
     optimizer.param_groups[0]['lr'] = frac * lr
@@ -37,21 +41,28 @@ for episode in range(num_episodes): # How many times to execute rollout
     all_obs = []
     rewards = []
     total_episode_reward = 0
+    num_invalid = 0
 
     t_acts = []
     old_t_log_probs = []
     nmol_acts = []
     old_nmol_log_probs = []
+    nmol_masks = []
     nfull_acts = []
     old_nfull_log_probs = []
+    nfull_masks = []
     b_acts = []
     old_b_log_probs = []
+    b_masks = []
 
     # Executing rollout
     for _ in range(num_rollout_steps):
+        print(f'    Rollout {_ + 1}')
         with torch.no_grad():
-            t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy = SURGE.act(batch_from_states([obs]), mol_env)
+            t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nmol_mask, nfull_act, nfull_log_prob, nfull_entropy, nfull_mask, b_act, b_log_prob, b_entropy, b_mask = SURGE.act(batch_from_states([obs]), mol_env, return_masks = True)
         next_obs, reward, terminated, truncated, info = mol_env.step(t_act[0], n1_act[0], n2_act[0], b_act[0])
+        if info[1]:
+            num_invalid += 1
         if terminated or truncated:
             next_obs, info = mol_env.reset()
 
@@ -64,12 +75,19 @@ for episode in range(num_episodes): # How many times to execute rollout
         old_t_log_probs.append(t_log_prob)
         nmol_acts.append(nmol_act)
         old_nmol_log_probs.append(nmol_log_prob)
+        nmol_masks.append(nmol_mask)
         nfull_acts.append(nfull_act)
         old_nfull_log_probs.append(nfull_log_prob)
+        nfull_masks.append(nfull_mask)
         b_acts.append(b_act)
         old_b_log_probs.append(b_log_prob)
+        b_masks.append(b_mask)
 
-    print(f'Episode {episode + 1} reward: {total_episode_reward}')
+    nmol_masks = [idx[0] for idx in nmol_masks]
+    nfull_masks = [idx[0] for idx in nfull_masks]
+    b_masks = [idx[0] for idx in b_masks]
+
+    print(f'Episode {episode + 1} --- reward: {total_episode_reward} --- invalid: {num_invalid}')
 
     # Calculate returns
     gamma = 0.99
@@ -81,13 +99,13 @@ for episode in range(num_episodes): # How many times to execute rollout
     # Cannot calculate GAEs without value estimate, so using normalized returns instead
 
     # Shuffle the rollout data
-    combined_data = list(zip(all_obs, rewards, t_acts, old_t_log_probs, nmol_acts, old_nmol_log_probs, nfull_acts, old_nfull_log_probs, b_acts, old_b_log_probs))
+    combined_data = list(zip(all_obs, rewards, t_acts, old_t_log_probs, nmol_acts, old_nmol_log_probs, nmol_masks, nfull_acts, old_nfull_log_probs, nfull_masks, b_acts, old_b_log_probs, b_masks))
     random.shuffle(combined_data)
-    all_obs, rewards, t_acts, old_t_log_probs, nmol_acts, old_nmol_log_probs, nfull_acts, old_nfull_log_probs, b_acts, old_b_log_probs = zip(*combined_data)
+    all_obs, rewards, t_acts, old_t_log_probs, nmol_acts, old_nmol_log_probs, nmol_masks, nfull_acts, old_nfull_log_probs, nfull_masks, b_acts, old_b_log_probs, b_masks = zip(*combined_data)
 
     # PPO training
     for _ in range(max_iters): # How many times to experience replay over a single run of rollout data
-        # print(f'    {_} iter')
+        print(f'    Experience replay: {_ + 1}')
 
         optimizer.zero_grad()
 
@@ -105,26 +123,45 @@ for episode in range(num_episodes): # How many times to execute rollout
         t_entropy = t_categorical.entropy().mean()
 
         state_idx, num_nodes = torch.unique(ep_obs_batch.batch, return_counts=True)
+        b_mask = torch.ones(b.shape, dtype=torch.float32)
         for i in range(len(num_nodes)): # Iterating through the number of molecules in a batch
             full_idx = sum(num_nodes[:i + 1]) # The length of the entire molecule and the atom bank
             prev_idx = sum(num_nodes[:i])
 
+            # nmol
             prob_molecule = n[prev_idx:full_idx - 10].view(-1)
-
-            # Masking
-
             prob_molecule = prob_molecule.softmax(dim=0)
+
+            nmol_mask = torch.ones(len(prob_molecule), dtype = torch.float32) # Invalid action masking
+            for idx in nmol_masks[i]:
+                nmol_mask[idx] = float(-1e10)
+            prob_molecule = torch.mul(prob_molecule, nmol_mask)
+            prob_molecule = prob_molecule.softmax(dim=0)
+
             nmol_categorical = Categorical(prob_molecule)
             new_nmol_log_probs.append(nmol_categorical.log_prob(nmol_acts[i][0]))
             nmol_entropy = nmol_categorical.entropy().mean()
 
+            # nfull
             prob_full = n[prev_idx:full_idx].view(-1)
+            prob_full = prob_full.softmax(dim = 0)
+
+            nfull_mask = torch.ones(len(prob_full), dtype=torch.float32)  # Invalid action masking
+            for idx in nfull_masks[i]:
+                nfull_mask[idx] = float(-1e10)
+            prob_full = torch.mul(prob_full, nfull_mask)
             prob_full = prob_full.softmax(dim=0)
+
             nfull_categorical = Categorical(prob_full)
             new_nfull_log_probs.append(nfull_categorical.log_prob(nfull_acts[i][0]))
             nfull_entropy = nfull_categorical.entropy().mean()
 
-        b_categorical = Categorical(logits = b)
+            for idx in b_masks[i]:
+                b_mask[i][idx] = float(-1e10)
+
+        b = torch.mul(b, b_mask)
+        b = b.softmax(dim = 1)
+        b_categorical = Categorical(b)
         new_b_log_probs = b_categorical.log_prob(torch.tensor([b[0] for b in b_acts], dtype = torch.float32))
         b_entropy = b_categorical.entropy().mean()
 
@@ -167,6 +204,9 @@ for episode in range(num_episodes): # How many times to execute rollout
         # print(nmol_loss)
         # print(nfull_loss)
         # print(b_loss)
+        # t_loss.backward()
+        # print('t')
+
         cumulative_loss = t_loss + nmol_loss + nfull_loss + b_loss
         # print(cumulative_loss)
         cumulative_loss.backward()

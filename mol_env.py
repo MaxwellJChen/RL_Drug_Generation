@@ -176,8 +176,10 @@ class single_mol_env():
 
         if terminate == 1: # Model decides to stop adding on to molecule
             terminated = True
+            reward = 0
         elif self.state.GetNumHeavyAtoms() == self.max_mol_size or self.timestep == self.max_steps: # The size of the molecule hits the limit
             truncated = True
+            reward = 0
         else: # No truncating or terminating
             if not invalid: # If the action is valid, update RWMol accordingly
                 self.state = self._update_state(atom1, atom2, bond)
@@ -413,6 +415,7 @@ class vectorized_mol_env():
             if terminated or truncated: # Reset this specific state
                 self._reset_single(i)
                 dones[i] += 1
+                reward = 0
 
             info = (self.timesteps[i], self.mol_sizes[i], invalid)
 
