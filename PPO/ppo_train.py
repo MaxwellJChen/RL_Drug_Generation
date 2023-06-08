@@ -9,48 +9,30 @@ import torch
 from torch.distributions.categorical import Categorical
 
 import random
-import imageio
-
-import rdkit.Chem as Chem
+import copy
+import matplotlib.pyplot as plt
+import rdkit.Chem.Draw as Draw
 
 """
 Proximal Policy Optimization with reference to https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/, https://www.youtube.com/watch?v=HR8kQMTO8bk&t=5s, and https://colab.research.google.com/drive/1MsRlEWRAk712AQPmoM9X9E6bNeHULRDb?usp=sharing
 """
-
-def record_episode(policy, env):
-    """
-    Runs a single full episode with a policy (trained or untrained) and an environment. Records as a GIF file.
-    """
-
-    # Run a single episode
-    terminated = False
-    truncated = False
-    num_steps = 0
-
-    state, info = env.reset()  # Initial state
-    p = policy
-    frames = []
-    frames.append(env.visualize(return_image=True))  # Visualize initial state
-    while not (terminated or truncated):
-        t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy = SURGE.act(batch_from_smiles([Chem.MolToSmiles(state)]))
-        state, reward, terminated, truncated, info = env.step(t_act, n1_act, n2_act, b_act)
-        # print(f'Timestep: {info[0]} --- {"Valid" if not info[0] else "Invalid"} --- Termination: {t_act} --- Nodes: {n1_act} & {n2_act} --- Bond: {b_act}')
-        frames.append(env.visualize(return_image=True))
-    imageio.mimsave('episode.gif', frames, 'GIF', duration = 1000/5)
 
 mol_env = single_mol_env(max_mol_size = 10, max_steps = 100)
 obs, info = mol_env.reset()
 initial_batch = batch_from_states([obs])
 
 SURGE = ppo_policy(initial_batch.num_node_features)
-optimizer = torch.optim.Adam(SURGE.parameters(), lr = 0.2, eps = 1e-8)
+lr = 1e-5
+optimizer = torch.optim.Adam(SURGE.parameters(), lr, eps = 1e-5)
 
-num_episodes = 20
-num_rollout_steps = 50
-max_iters = 50
-print_every_episode = 5
-record_every_episode = 5
+num_episodes = 100
+num_rollout_steps = 100
+max_iters = 100
 for episode in range(num_episodes): # How many times to execute rollout
+    # Learning rate annealing
+    frac = 1.0 - (episode) / num_episodes
+    optimizer.param_groups[0]['lr'] = frac * lr
+
     # Storage variables
     all_obs = []
     rewards = []
@@ -65,12 +47,10 @@ for episode in range(num_episodes): # How many times to execute rollout
     b_acts = []
     old_b_log_probs = []
 
-    # Rollout for 100 time steps
+    # Executing rollout
     for _ in range(num_rollout_steps):
-        # print(f'{_ + 1} step')
-
         with torch.no_grad():
-            t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy = SURGE.act(batch_from_states([obs]))
+            t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy = SURGE.act(batch_from_states([obs]), mol_env)
         next_obs, reward, terminated, truncated, info = mol_env.step(t_act[0], n1_act[0], n2_act[0], b_act[0])
         if terminated or truncated:
             next_obs, info = mol_env.reset()
@@ -89,7 +69,7 @@ for episode in range(num_episodes): # How many times to execute rollout
         b_acts.append(b_act)
         old_b_log_probs.append(b_log_prob)
 
-    print(f'Episode {_ + 1} reward: {total_episode_reward}')
+    print(f'Episode {episode + 1} reward: {total_episode_reward}')
 
     # Calculate returns
     gamma = 0.99
@@ -120,7 +100,7 @@ for episode in range(num_episodes): # How many times to execute rollout
         ep_obs_batch = batch_from_states(all_obs)
         t, n, b = SURGE(ep_obs_batch.x, ep_obs_batch.edge_index, ep_obs_batch.batch)
 
-        t_categorical = Categorical(t)
+        t_categorical = Categorical(logits = t)
         new_t_log_probs = t_categorical.log_prob(torch.tensor([t[0] for t in t_acts], dtype = torch.float32))
         t_entropy = t_categorical.entropy().mean()
 
@@ -130,19 +110,21 @@ for episode in range(num_episodes): # How many times to execute rollout
             prev_idx = sum(num_nodes[:i])
 
             prob_molecule = n[prev_idx:full_idx - 10].view(-1)
+
+            # Masking
+
             prob_molecule = prob_molecule.softmax(dim=0)
             nmol_categorical = Categorical(prob_molecule)
             new_nmol_log_probs.append(nmol_categorical.log_prob(nmol_acts[i][0]))
             nmol_entropy = nmol_categorical.entropy().mean()
 
             prob_full = n[prev_idx:full_idx].view(-1)
-            prob_full = torch.cat((prob_full[:nmol_acts[i][0]], prob_full[nmol_acts[i][0] + 1:]))
             prob_full = prob_full.softmax(dim=0)
             nfull_categorical = Categorical(prob_full)
             new_nfull_log_probs.append(nfull_categorical.log_prob(nfull_acts[i][0]))
             nfull_entropy = nfull_categorical.entropy().mean()
 
-        b_categorical = Categorical(b)
+        b_categorical = Categorical(logits = b)
         new_b_log_probs = b_categorical.log_prob(torch.tensor([b[0] for b in b_acts], dtype = torch.float32))
         b_entropy = b_categorical.entropy().mean()
 

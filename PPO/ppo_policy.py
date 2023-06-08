@@ -14,6 +14,8 @@ import numpy as np
 import random
 import copy
 
+from mol_env import single_mol_env
+
 torch.manual_seed(42)
 
 def _fcn_init(fcn_layer, std = np.sqrt(2), bias_const = 0.0):
@@ -39,8 +41,10 @@ class ppo_policy(nn.Module):
         super(ppo_policy, self).__init__()
         # Global embedder
         self.conv1 = GCNConv(num_node_features, 32)
-        self.conv2 = GCNConv(32, 24)
-        self.g_fcn1 = _fcn_init(nn.Linear(24, global_vector_dim))
+        self.conv2 = GCNConv(32, 32)
+        self.conv3 = GCNConv(32, 24)
+        self.g_fcn1 = _fcn_init(nn.Linear(24, 24))
+        self.g_fcn2 = _fcn_init(nn.Linear(24, global_vector_dim))
 
         # Termination predictor
         self.t_fcn1 = _fcn_init(nn.Linear(global_vector_dim, 2))
@@ -64,19 +68,22 @@ class ppo_policy(nn.Module):
         x = x.relu()
         x = self.conv2(x, edge_index)  # Node embeddings
         x = x.relu()
+        x = self.conv3(x, edge_index)
+        x = x.relu()
 
         g = global_mean_pool(x, batch)  # Globally embedded vector
         g = self.g_fcn1(g)
+        g = self.g_fcn2(g)
 
         # Termination prediction
         t = self.t_fcn1(g)  # Logits
-        t = t.softmax(dim=1)  # Probability distribution of termination for each molecule in batch
+        t = t.relu()
 
         # Atom prediction
         n = self.n_fcn1(x)
         n = n.relu()
         n = self.n_fcn2(n)
-        n = torch.vstack([n[torch.where(batch == g)].softmax(dim=0) for g in torch.unique(batch)])  # Batch-wise softmax
+        n = n.relu()
 
         # Bond prediction
         b = n * x  # Weighs each node by probability of bond formation
@@ -84,11 +91,11 @@ class ppo_policy(nn.Module):
         b = self.b_fcn1(b)
         b = b.relu()
         b = self.b_fcn2(b)
-        b = b.softmax(dim=0)  # Probability distribution of 3 bonds for each molecule in batch
+        b = b.relu()
 
         return t, n, b
 
-    def act(self, batch):
+    def act(self, batch, mol_env):
         """
         Accepts a batch of graphs. Outputs a list of actions for each state in batch alongside with log probability.
         """
@@ -97,7 +104,7 @@ class ppo_policy(nn.Module):
                                batch.batch)  # Generate probability distributions for each action
 
         # Termination
-        t = Categorical(t)
+        t = Categorical(logits = t) # No invalid action masking needed for termination
         t_act = t.sample()
         t_log_prob = t.log_prob(t_act)
         t_entropy = t.entropy()
@@ -121,6 +128,14 @@ class ppo_policy(nn.Module):
             prev_idx = sum(num_nodes[:i])
 
             prob_molecule = n[prev_idx:full_idx - 10].view(-1)
+
+            # Invalid action masking for prob_molecule
+            prob_mol_mask = [k for k, v in mol_env.has_max_valence.items() if v] # If the valence is already filled, cannot select an atom from the original molecule
+            for idx in prob_mol_mask:
+                prob_molecule[idx] = float('-inf')
+            # print(f'prob_molecule: {prob_molecule}')
+            # print(f'prob_mol_mask: {prob_mol_mask}')
+
             prob_molecule = prob_molecule.softmax(dim=0)
             c_molecule = Categorical(prob_molecule)
             i_molecule = c_molecule.sample()
@@ -132,7 +147,25 @@ class ppo_policy(nn.Module):
 
             # Create new categorical distribution that includes atom bank
             prob_full = n[prev_idx:full_idx].view(-1)
-            prob_full = torch.cat((prob_full[:i_molecule], prob_full[i_molecule + 1:]))  # Removing i_molecule with indexing
+
+            # Invalid action masking for prob_full
+            prob_full_mask = []
+            prob_full_mask += prob_mol_mask # Cannot have a full valence
+            prob_full_mask += [i_molecule] # Cannot be the same index as the first selected value
+            for idx in range(mol_env.mol_size): # Cannot already have a bond
+                if mol_env.state.GetBondBetweenAtoms(idx, int(i_molecule)) is not None:
+                    prob_full_mask += [idx]
+            ring_info = mol_env.state.GetRingInfo() # Cannot be in a ring with the first selected atom
+            if len(ring_info.AtomRings()) != 0:
+                for idx in range(len(mol_env.state.GetAtoms())):
+                    if ring_info.AreAtomsInSameRing(idx, int(i_molecule)):
+                        prob_full_mask += [idx]
+            prob_full_mask = list(set([int(idx) for idx in prob_full_mask]))
+            for idx in prob_full_mask:
+                prob_full[idx] = float('-inf')
+            # print(f'prob_full: {prob_full}')
+            # print(f'prob_full_mask: {prob_full_mask}')
+
             prob_full = prob_full.softmax(dim=0)
             c_full = Categorical(prob_full)
             i_full = c_full.sample()
@@ -144,12 +177,29 @@ class ppo_policy(nn.Module):
 
             if i_full >= i_molecule:
                 n1_act.append(i_molecule)
-                n2_act.append(i_full + 1) # Update i_full to account for i_molecule node being removed
+                n2_act.append(i_full) # Update i_full to account for i_molecule node being removed
             else:
                 n2_act.append(i_molecule)
                 n1_act.append(i_full)
 
         # Bond
+        # Invalid action masking for bond
+        atoms = [atom for atom in mol_env.state.GetAtoms()]
+        n1_valence = mol_env.atom_valences[int(n1_act[0])]
+        n1_max_valence = mol_env.max_valences[atoms[int(n1_act[0])].GetSymbol()]
+        if int(n2_act[0]) >= mol_env.mol_size: # Adding a new atom
+            n2_valence = 0
+            n2_max_valence = mol_env.max_valences[mol_env.atom_bank[int(n2_act[0]) - mol_env.mol_size].GetSymbol()]
+        else:
+            n2_valence = mol_env.atom_valences[int(n2_act[0])]
+            n2_max_valence = mol_env.max_valences[atoms[int(n2_act[0])].GetSymbol()]
+        allowed_bonds = range(min(n1_max_valence - n1_valence, n2_max_valence - n2_valence))
+        bond_mask = [0, 1, 2]
+        bond_mask = [idx for idx in bond_mask if idx not in allowed_bonds]
+        for idx in bond_mask:
+            b[0][idx] = float('-inf')
+
+        b = b.softmax(dim = 1)
         b = Categorical(b)
         b_act = b.sample()
         b_log_prob = b.log_prob(b_act)

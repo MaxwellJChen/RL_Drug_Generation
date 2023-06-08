@@ -43,35 +43,47 @@ def draw_mol(mol):
 
 def rollout_mol(mol):
     """
-    Given a molecule, splits it based on BFS and outputs terminate, atom1, atom2, bond, and states, the usual observations
+    Given a molecule (or SMILES string), splits it based on BFS and outputs terminate, atom1, atom2, bond, and states, the usual observations
     that would occur during an episode of rollout.
     """
 
-    # Represent a graph as a dictionary
+    if isinstance(mol, str):
+        mol = Chem.MolFromSmiles(mol)
+
+    # Represent a molecular graph as a dictionary
     rdkit.Chem.rdmolops.Kekulize(mol)
     mol_dict = {}
     for atom in mol.GetAtoms():
         atom_idx = str(atom.GetIdx())
         neighbors = [str(neighbor.GetIdx()) for neighbor in atom.GetNeighbors()]
-        # print(atom_idx)
-        # print(neighbors)
         mol_dict[atom_idx] = neighbors
 
-    draw_mol(mol)
+    # draw_mol(mol)
 
     # Start the BFS at carbon atom with the most bonds
     max_bonds = 0
-    carbon_with_max_bonds = None
+    atom_with_max_bonds = None
 
+    has_carbons = False
     for atom in mol.GetAtoms():
-        if atom.GetSymbol() == 'C': # If atom is a carbon
+        if atom.GetSymbol() == 'C':
+            has_carbons = True
+    if has_carbons:
+        for atom in mol.GetAtoms():
+            if atom.GetSymbol() == 'C': # If atom is a carbon
+                num_bonds = atom.GetDegree()
+                if num_bonds > max_bonds:
+                    max_bonds = num_bonds
+                    atom_with_max_bonds = atom
+    else:
+        for atom in mol.GetAtoms():
             num_bonds = atom.GetDegree()
             if num_bonds > max_bonds:
                 max_bonds = num_bonds
-                carbon_with_max_bonds = atom
+                atom_with_max_bonds = atom
 
     # Pass dictionary into BFS method
-    order = BFS(mol_dict, str(carbon_with_max_bonds.GetIdx()))
+    order = BFS(mol_dict, str(atom_with_max_bonds.GetIdx()))
 
     # Rollout
     # Record terminate, atom1, atom2, bond, and the state for each "step"
@@ -79,7 +91,7 @@ def rollout_mol(mol):
     # Initial state is one carbon
     states = []
     state = RWMol()
-    state.AddAtom(Chem.Atom('C'))
+    state.AddAtom(Chem.Atom(atom_with_max_bonds.GetSymbol()))
     states.append(copy.copy(state))
 
     terminate = []
@@ -87,15 +99,15 @@ def rollout_mol(mol):
     atom2 = [] # Higher index of addition
     bond = [] # Bond index
 
-    print(f'Order: {order}')
-    print(f'Mol Dict: {mol_dict}')
-    print()
+    # print(f'Order: {order}')
+    # print(f'Mol Dict: {mol_dict}')
+    # print()
 
     mol_atoms = [atom for atom in mol.GetAtoms()]
     atom_bank_symbols = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']
 
     for i in range(len(order) - 1):
-        print(f'{i + 1}')
+        # print(f'{i + 1}')
         state.AddAtom(Chem.Atom(mol_atoms[int(order[i + 1])].GetSymbol())) # Add a new atom
 
         # Find the indices of other atoms in the state that the new atom should form bonds with
@@ -125,5 +137,6 @@ def rollout_mol(mol):
 
     return terminate, atom1, atom2, bond, states
 
-mol = Chem.MolFromSmiles('Cn1cnc2n(C)c(=O)n(C)c(=O)c12') # Caffeine molecule
-terminate, atom1, atom2, bond, states = rollout_mol(mol)
+if __name__ == '__main__':
+    mol = Chem.MolFromSmiles('Cn1cnc2n(C)c(=O)n(C)c(=O)c12') # Caffeine molecule
+    terminate, atom1, atom2, bond, states = rollout_mol(mol)

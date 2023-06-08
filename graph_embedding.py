@@ -3,6 +3,9 @@ import torch
 import rdkit
 from rdkit import Chem
 import numpy as np
+import copy
+import matplotlib.pyplot as plt
+import rdkit.Chem.Draw as Draw
 
 """
 https://www.blopig.com/blog/2022/02/how-to-turn-a-smiles-string-into-a-molecular-graph-for-pytorch-geometric/
@@ -15,6 +18,16 @@ https://arxiv.org/pdf/2012.04444.pdf
 1 is in a ring
 1 is in aromatic system
 """
+
+def draw_mol(mol):
+    """Displays an image of an RDKit molecule"""
+    mol_copy = copy.copy(mol)
+    for atom in mol_copy.GetAtoms():
+        atom.SetProp("molAtomMapNumber", str(atom.GetIdx()))
+    img = Draw.MolToImage(mol_copy)
+    plt.imshow(img)
+    plt.axis('off')
+    plt.show()
 
 def one_hot_encoding(x, permitted_list):
     """

@@ -9,30 +9,27 @@ import sys
 sys.path.append(os.path.join(RDConfig.RDContribDir, 'SA_Score'))
 import sascorer
 
-import graph_embedding as GE
-
 import copy
 
 # Visualize
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 
-import gymnasium as gym
-from gymnasium import spaces
-
 class single_mol_env():
     """
     Unvectorized environment
     """
 
-    def __init__(self, max_mol_size, max_steps, render_mode = None):
+    def __init__(self, max_mol_size, max_steps):
         self.state = RWMol()
         self.mol_size = self.state.GetNumHeavyAtoms()  # The number of heavy atoms in the current molecule
 
         self.atom_bank = [Chem.Atom(symbol) for symbol in ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']]
         self.bond_bank = [Chem.BondType.SINGLE, Chem.BondType.DOUBLE, Chem.BondType.TRIPLE]
 
-        self.max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 2, 'F': 1, 'Cl': 1, 'P': 3, 'Br': 1, 'I': 1, 'B': 3}
+        self.max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
+        self.has_max_valence = {} # Records the atoms that are bonded to their maximum number of heavy neighbors
+        self.atom_valences = {}
 
         self.max_mol_size = max_mol_size
 
@@ -144,6 +141,16 @@ class single_mol_env():
         self.mol_size = self.state.GetNumHeavyAtoms()
         self.timestep = 0
 
+        self.atom_valences = {} # Reset atom valence
+        self.has_max_valence = {}
+        atoms = self.state.GetAtoms()
+        for i, atom in enumerate(self.state.GetAtoms()):
+            self.atom_valences[i] = sum([int(bond.GetBondType()) for bond in atom.GetBonds()]) # Recalculate atom valences
+            if self.max_valences[atoms[i].GetSymbol()] == self.atom_valences[i]:
+                self.has_max_valence[i] = True
+            else:
+                self.has_max_valence[i] = False
+
         info = (self.timestep, False)
 
         return self.state, info
@@ -176,6 +183,21 @@ class single_mol_env():
                 self.state = self._update_state(atom1, atom2, bond)
                 self.state.UpdatePropertyCache()
                 Chem.SanitizeMol(self.state, catchErrors=True)
+
+                self.atom_valences[atom1] += bond + 1  # Updating the atom valences
+                if atom2 >= self.mol_size:  # Adding a new atom
+                    self.atom_valences[self.mol_size] = bond + 1
+                    self.has_max_valence[self.mol_size] = False
+                else:
+                    self.atom_valences[atom2] += bond + 1
+
+                atoms = self.state.GetAtoms()
+                for valence in self.atom_valences:
+                    # Get the max valence
+                    atom_max_valence = self.max_valences[atoms[valence].GetSymbol()]
+                    if atom_max_valence == self.atom_valences[valence]:
+                        self.has_max_valence[valence] = True
+
                 self.mol_size = self.state.GetNumHeavyAtoms()
                 reward = self._reward()
 
@@ -430,3 +452,42 @@ class vectorized_mol_env():
             plt.axis('off')
             plt.text(x=0, y=1, s=f"Timestep: {self.timestep}", size='large', transform=plt.gca().transAxes)
             plt.show()
+
+if __name__ == '__main__':
+    from PPO.ppo_policy import ppo_policy
+    from graph_embedding import batch_from_smiles, batch_from_states, draw_mol
+    import warnings
+    import torch
+
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+    smiles = 'Clc1ccc([C@]23CNC[C@H]2C3)cc1Cl'
+    sample_batch = batch_from_smiles([smiles])
+
+    SURGE = ppo_policy(sample_batch.num_node_features)
+    mol_env = single_mol_env(max_mol_size = 50, max_steps = 50)
+    obs, info = mol_env.reset()
+    mol_env.visualize()
+
+    all_obs = []
+
+    # ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']
+
+    for _ in range(20):
+        print(mol_env.timestep)
+        mol_env.visualize()
+        with torch.no_grad():
+            t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy = SURGE.act(batch_from_states([obs]), mol_env)
+        print(f'{t_act} {n1_act} {n2_act} {b_act}')
+        next_obs, reward, terminated, truncated, info = mol_env.step(0, n1_act[0], n2_act[0], b_act[0])
+        if info[1]:
+            print('Invalid action.')
+        else:
+            print('Valid.')
+        if terminated or truncated:
+            next_obs, info = mol_env.reset()
+
+        all_obs.append(obs)
+        obs = next_obs
+
+        print()
