@@ -41,6 +41,16 @@ def draw_mol(mol):
     plt.axis('off')
     plt.show()
 
+# def draw_mol_i(mol, i):
+#     """Displays an image of an RDKit molecule"""
+#     mol_copy = copy.copy(mol)
+#     for atom in mol_copy.GetAtoms():
+#         atom.SetProp("molAtomMapNumber", str(atom.GetIdx()))
+#     img = Draw.MolToImage(mol_copy)
+#     plt.imshow(img)
+#     plt.axis('off')
+#     plt.savefig(f'{i}')
+
 def rollout_mol(mol):
     """
     Given a molecule (or SMILES string), splits it based on BFS and outputs terminate, atom1, atom2, bond, and states, the usual observations
@@ -130,13 +140,26 @@ def rollout_mol(mol):
             terminate += [0]
             atom1.append(order[:i + 1].index(idx))
             atom2.append(i + 1)
-            bond.append(int(mol.GetBondBetweenAtoms(int(idx), int(order[i + 1])).GetBondType()))
-            # draw_mol(state)
+            bond.append(int(mol.GetBondBetweenAtoms(int(idx), int(order[i + 1])).GetBondType()) - 1)
+        # draw_mol(state, i)
 
     terminate[-1] = 1
 
     return terminate, atom1, atom2, bond, states
 
 if __name__ == '__main__':
-    mol = Chem.MolFromSmiles('Cn1cnc2n(C)c(=O)n(C)c(=O)c12') # Caffeine molecule
+    # mol = Chem.MolFromSmiles('Cn1cnc2n(C)c(=O)n(C)c(=O)c12') # Caffeine molecule
+    # terminate, atom1, atom2, bond, states = rollout_mol(mol)
+    mol = Chem.MolFromSmiles('CCOc1cc2ncc(C#N)c(Nc3ccc(OCc4cccc(F)c4)c(Cl)c3)c2cc1NC(=O)/C=C/CN(C)C')
+    print(len(mol.GetAtoms()))
     terminate, atom1, atom2, bond, states = rollout_mol(mol)
+    print(len(states[-1].GetAtoms()))
+    draw_mol(states[-1])
+    print(Chem.MolToSmiles(states[-1]))
+    print(bond.index(3))
+    draw_mol(states[23])
+    print(terminate[23])
+    print(atom1[23])
+    print(atom2[23])
+    print(bond[23])
+    draw_mol(states[24])

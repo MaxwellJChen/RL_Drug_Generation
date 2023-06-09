@@ -1,20 +1,10 @@
 import torch
 import torch.nn as nn
-import torch.functional as F
 from torch.distributions import Categorical
 
-import torch_geometric
-from torch_geometric.nn import GCNConv, global_mean_pool, global_add_pool
-
-import graph_embedding
-
-import rdkit.Chem as Chem
+from torch_geometric.nn import GatedGraphConv, global_mean_pool, global_add_pool
 
 import numpy as np
-import random
-import copy
-
-from mol_env import single_mol_env
 
 torch.manual_seed(42)
 
@@ -40,21 +30,22 @@ class ppo_policy(nn.Module):
     def __init__(self, num_node_features, global_vector_dim = 32):
         super(ppo_policy, self).__init__()
         # Global embedder
-        self.conv1 = GCNConv(num_node_features, 32)
-        self.conv2 = GCNConv(32, 32)
-        self.conv3 = GCNConv(32, 24)
-        self.g_fcn1 = _fcn_init(nn.Linear(24, 24))
+        self.conv1 = GatedGraphConv(num_node_features, 10)
+        self.conv2 = GatedGraphConv(32, 10)
+        self.conv3 = GatedGraphConv(32, 10)
+        self.g_fcn1 = _fcn_init(nn.Linear(32, 24))
         self.g_fcn2 = _fcn_init(nn.Linear(24, global_vector_dim))
 
         # Termination predictor
-        self.t_fcn1 = _fcn_init(nn.Linear(global_vector_dim, 2))
+        self.t_fcn1 = _fcn_init(nn.Linear(global_vector_dim, 32))
+        self.t_fcn2 = _fcn_init(nn.Linear(32, 2))
 
         # Node predictor
-        self.n_fcn1 = _fcn_init(nn.Linear(24, 16))
+        self.n_fcn1 = _fcn_init(nn.Linear(32, 16))
         self.n_fcn2 = _fcn_init(nn.Linear(16, 1))
 
         # Bond predictor
-        self.b_fcn1 = _fcn_init(nn.Linear(24, 16))
+        self.b_fcn1 = _fcn_init(nn.Linear(32, 16))
         self.b_fcn2 = _fcn_init(nn.Linear(16, 3))
 
     def forward(self, x, edge_index, batch):
@@ -76,7 +67,9 @@ class ppo_policy(nn.Module):
         g = self.g_fcn2(g)
 
         # Termination prediction
-        t = self.t_fcn1(g)  # Logits
+        t = self.t_fcn1(g)
+        t = t.relu()
+        t = self.t_fcn2(t)
         t = t.relu()
 
         # Atom prediction
@@ -86,14 +79,13 @@ class ppo_policy(nn.Module):
         n = n.relu()
 
         # Bond prediction
-        b = n * x  # Weighs each node by probability of bond formation
-        b = global_add_pool(b, batch)
+        b = global_add_pool(x, batch)
         b = self.b_fcn1(b)
         b = b.relu()
         b = self.b_fcn2(b)
         b = b.relu()
 
-        return t, n, b
+        return t, n, b # Returns logits
 
     def act(self, batch, mol_env, return_masks = False):
         """
@@ -103,11 +95,17 @@ class ppo_policy(nn.Module):
         t, n, b = self.forward(batch.x, batch.edge_index,
                                batch.batch)  # Generate probability distributions for each action
 
+        # Record the masks applied for training PPO
+        t_masks = []
+        nmol_masks = []
+        nfull_masks = []
+        b_masks = []
+
         # Termination
-        t = Categorical(logits = t) # No invalid action masking needed for termination
+        t = t.softmax(dim=1)
+        t = Categorical(t) # No invalid action masking needed for termination
         t_act = t.sample()
         t_log_prob = t.log_prob(t_act)
-        t_entropy = t.entropy()
 
         # Record processed actions to send directly to environment
         n1_act = []
@@ -116,15 +114,8 @@ class ppo_policy(nn.Module):
         # Record the outputs of the categorical distributions
         nmol_act = []
         nmol_log_prob = []
-        nmol_entropy = []
         nfull_act = []
         nfull_log_prob = []
-        nfull_entropy= []
-
-        # Record the masks applied for training PPO
-        nmol_masks = []
-        nfull_masks = []
-        b_masks = []
 
         # Select two atoms: one from the original molecule and another from the every possible atom.
         state_idx, num_nodes = torch.unique(batch.batch, return_counts=True)
@@ -138,7 +129,7 @@ class ppo_policy(nn.Module):
             # Invalid action masking for prob_molecule
             prob_mol_mask = [k for k, v in mol_env.has_max_valence.items() if v] # If the valence is already filled, cannot select an atom from the original molecule
             for idx in prob_mol_mask:
-                prob_molecule[idx] = float('-inf')
+                prob_molecule[idx] = float(-1e10)
             # print(f'prob_molecule: {prob_molecule}')
             # print(f'prob_mol_mask: {prob_mol_mask}')
 
@@ -146,10 +137,8 @@ class ppo_policy(nn.Module):
             c_molecule = Categorical(prob_molecule)
             i_molecule = c_molecule.sample()
             i_molecule_log_prob = c_molecule.log_prob(i_molecule)
-            i_molecule_entropy = c_molecule.entropy()
             nmol_act.append(i_molecule)
             nmol_log_prob.append(i_molecule_log_prob)
-            nmol_entropy.append(i_molecule_entropy)
 
             # Create new categorical distribution that includes atom bank
             prob_full = n[prev_idx:full_idx].view(-1)
@@ -168,7 +157,7 @@ class ppo_policy(nn.Module):
                         prob_full_mask += [idx]
             prob_full_mask = list(set([int(idx) for idx in prob_full_mask]))
             for idx in prob_full_mask:
-                prob_full[idx] = float('-inf')
+                prob_full[idx] = float(-1e10)
             # print(f'prob_full: {prob_full}')
             # print(f'prob_full_mask: {prob_full_mask}')
 
@@ -176,10 +165,8 @@ class ppo_policy(nn.Module):
             c_full = Categorical(prob_full)
             i_full = c_full.sample()
             i_full_log_prob = c_full.log_prob(i_full)
-            i_full_entropy = c_full.entropy()
             nfull_act.append(i_full)
             nfull_log_prob.append(i_full_log_prob)
-            nfull_entropy.append(i_full_entropy)
 
             if i_full >= i_molecule:
                 n1_act.append(i_molecule)
@@ -207,7 +194,7 @@ class ppo_policy(nn.Module):
         bond_mask = [0, 1, 2]
         bond_mask = [idx for idx in bond_mask if idx not in allowed_bonds]
         for idx in bond_mask:
-            b[0][idx] = float('-inf')
+            b[0][idx] = float(-1e10)
         if return_masks:
             b_masks.append(bond_mask)
 
@@ -215,7 +202,6 @@ class ppo_policy(nn.Module):
         b = Categorical(b)
         b_act = b.sample()
         b_log_prob = b.log_prob(b_act)
-        b_entropy = b.entropy()
 
         t_act = [int(t) for t in list(t_act)]
         n1_act = [int(a1) for a1 in n1_act]
@@ -223,6 +209,6 @@ class ppo_policy(nn.Module):
         b_act = [int(b) for b in list(b_act)]
 
         if return_masks:
-            return t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nmol_masks, nfull_act, nfull_log_prob, nfull_entropy, nfull_masks, b_act, b_log_prob, b_entropy, b_masks
+            return t_act, t_log_prob, t_masks, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_masks, nfull_act, nfull_log_prob, nfull_masks, b_act, b_log_prob, b_masks
         else:
-            return t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy
+            return t_act, t_log_prob, n1_act, n2_act, nmol_act, nmol_log_prob, nfull_act, nfull_log_prob, b_act, b_log_prob

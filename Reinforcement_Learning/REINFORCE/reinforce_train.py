@@ -1,4 +1,4 @@
-from mol_env import single_mol_env
+from Reinforcement_Learning.mol_env import single_mol_env
 from reinforce_policy import reinforce_policy
 from graph_embedding import batch_from_smiles
 

@@ -13,7 +13,7 @@ import copy
 
 # Visualize
 import matplotlib.pyplot as plt
-from PIL import Image, ImageDraw, ImageFont
+
 
 class single_mol_env():
     """
@@ -166,21 +166,24 @@ class single_mol_env():
         """
 
         self.timestep += 1
-        invalid = self._validate_action(atom1, atom2, bond) # True if the proposed action is invalid
+        invalid = False # True if the proposed action is invalid
         info = (self.timestep, invalid)
 
         truncated = False
         terminated = False
 
-        reward = -0.5 # If the action is invalid, return the current state again with -0.5 as reward
+        reward = 0 # If the action is invalid, return the current state again with -0.5 as reward
 
         if terminate == 1: # Model decides to stop adding on to molecule
             terminated = True
-            reward = 0
+            if self.mol_size != 1:
+                reward = self._reward() + self.mol_size/50
         elif self.state.GetNumHeavyAtoms() == self.max_mol_size or self.timestep == self.max_steps: # The size of the molecule hits the limit
             truncated = True
-            reward = 0
+            if self.mol_size != 1:
+                reward = self._reward() + self.mol_size/50
         else: # No truncating or terminating
+            invalid = self._validate_action(atom1, atom2, bond)  # True if the proposed action is invalid
             if not invalid: # If the action is valid, update RWMol accordingly
                 self.state = self._update_state(atom1, atom2, bond)
                 self.state.UpdatePropertyCache()
@@ -201,7 +204,7 @@ class single_mol_env():
                         self.has_max_valence[valence] = True
 
                 self.mol_size = self.state.GetNumHeavyAtoms()
-                reward = self._reward()
+                reward = self._reward() + self.mol_size/50
 
         return self.state, reward, terminated, truncated, info
 
@@ -457,8 +460,8 @@ class vectorized_mol_env():
             plt.show()
 
 if __name__ == '__main__':
-    from PPO.ppo_policy import ppo_policy
-    from graph_embedding import batch_from_smiles, batch_from_states, draw_mol
+    from Reinforcement_Learning.PPO.ppo_policy import ppo_policy
+    from graph_embedding import batch_from_smiles, batch_from_states
     import warnings
     import torch
 
@@ -480,9 +483,9 @@ if __name__ == '__main__':
         print(mol_env.timestep)
         mol_env.visualize()
         with torch.no_grad():
-            t_act, t_log_prob, t_entropy, n1_act, n2_act, nmol_act, nmol_log_prob, nmol_entropy, nfull_act, nfull_log_prob, nfull_entropy, b_act, b_log_prob, b_entropy = SURGE.act(batch_from_states([obs]), mol_env)
+            t_act, t_log_prob, n1_act, n2_act, nmol_act, nmol_log_prob, nfull_act, nfull_log_prob, b_act, b_log_prob = SURGE.act(batch_from_states([obs]), mol_env)
         print(f'{t_act} {n1_act} {n2_act} {b_act}')
-        next_obs, reward, terminated, truncated, info = mol_env.step(0, n1_act[0], n2_act[0], b_act[0])
+        next_obs, reward, terminated, truncated, info = mol_env.step(t_act[0], n1_act[0], n2_act[0], b_act[0])
         if info[1]:
             print('Invalid action.')
         else:
