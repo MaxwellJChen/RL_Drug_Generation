@@ -183,125 +183,56 @@ class SURGE(nn.Module):
 
         return v
 
-    def act(self, batch):
-        """
-        Batch of graphs from states. List of states. States are RWMol or Mol.
-        """
-
+    def act(self, batch, return_log_probs = False):
+        # Obtain the unnormalized log probabilities for the 4 separate probability distributions
         t_logits, nmol_logits, nfull_logits, b_logits = self.policy(batch)
 
+        # Termination sampling
+        t_categorical = Categorical(logits = t_logits)
+        t_actions = t_categorical.sample()
+        if return_log_probs: # Record the log probabilities if specified
+            t_log_probs = t_categorical.log_prob(t_actions)
+        t_actions = t_actions
 
+        # Nmol and nfull sampling
+        nmol_actions = [] # Initialize lists to hold actions for both nmol and nfull
+        nfull_actions = []
 
-    # def act(self, batch, states):
-    #     """
-    #     Batch of graphs from states. List of states. States are RWMol or Mol.
-    #     """
-    #
-    #     t_logits, nmol_logits, nfull_logits, b_logits = self.policy(batch)
-    #
-    #     # Empty masks for termination and bond. Nmol and Nfull are easier made after torch.split and iterating through individual graphs.
-    #     t_mask = torch.ones(t_logits.size())
-    #
-    #     nmol_logits = torch.squeeze(nmol_logits)
-    #     nfull_logits = torch.squeeze(nfull_logits)
-    #
-    #     nmol_sizes = [state.GetNumHeavyAtoms() for state in states] # List of the number of nodes in each graph in nmol
-    #     nfull_sizes = [size + 10 for size in nmol_sizes] # List of number of nodes in each graph for nfull
-    #
-    #     nmol_masks = []
-    #     nfull_masks = []
-    #
-    #     nmol_act = []
-    #     nmol_log_prob = []
-    #     nfull_act = []
-    #     nfull_log_prob = []
-    #     for i, (nmol_single, nfull_single) in enumerate(zip(torch.split(nmol_logits, nmol_sizes), torch.split(nfull_logits, nfull_sizes))):
-    #         # Create empty masks
-    #         nmol_mask = torch.ones(nmol_single.size())
-    #         nfull_mask = torch.ones(nfull_single.size())
-    #
-    #         has_max_valence = [self.max_valences[atom.GetSymbol()] == sum([int(bond.GetBondType()) for bond in atom.GetBonds()]) - atom.GetFormalCharge() for atom in states[i].GetAtoms()] # List of booleans representing whether an atom in the original molecule has been bonded to its maximal valence
-    #         valence_diffs = [self.max_valences[atom.GetSymbol()] - sum([int(bond.GetBondType()) for bond in atom.GetBonds()]) - atom.GetFormalCharge() for atom in states[i].GetAtoms()] # List of ints representing difference in maximum valence of an atom and the actual valence
-    #
-    #         if all(has_max_valence): # 1. All atoms are at their max valence. Must terminate generation.
-    #             t_mask[i][0] = 0
-    #         for j in range(len(has_max_valence)): # 2/3. A specific atom is at its max valence, so it cannot be chosen.
-    #             if has_max_valence[j]:
-    #                 nmol_mask[j] = 0
-    #                 nfull_mask[j] = 0
-    #
-    #         nmol_masks.append(nmol_mask)
-    #         nmol_mask_bool = nmol_mask.type(torch.BoolTensor)
-    #         nmol_masked = torch.where(nmol_mask_bool, nmol_single, torch.tensor(-1e10))
-    #         nmol_categorical = Categorical(logits = nmol_masked)
-    #         nmol_single_act = nmol_categorical.sample()
-    #         nmol_log_prob += [nmol_categorical.log_prob(nmol_single_act).item()]
-    #         nmol_single_act = nmol_single_act.item()
-    #         nmol_act += [nmol_single_act]
-    #
-    #         # 4. Cannot select the same atom in nfull as in nmol
-    #         nfull_mask[nmol_single_act] = 0
-    #
-    #         ring_info = states[i].GetRingInfo()
-    #         for j in range(states[i].GetNumHeavyAtoms()): # Iterate through all the atoms in the molecule
-    #             if j != nmol_single_act and not has_max_valence[j]: # If atom j is not the same as nmol_single_act and can form a bond
-    #
-    #                 # 5. Both atoms are not in the same ring
-    #                 if len(ring_info.AtomRings()) != 0 and ring_info.AreAtomsInSameRing(j, nmol_single_act):  # Cannot make a bond between atoms in the same ring.
-    #                     nfull_mask[j] = 0
-    #
-    #                 # 6. Both atoms are not already bonded
-    #                 elif states[i].GetBondBetweenAtoms(j, nmol_single_act) is not None: # Cannot make a bond between atoms if they already have a bond.
-    #                     nfull_mask[j] = 0
-    #
-    #                 # 7. Forming a bond between the atoms would not result in a ring size smaller than 3 or greater than 7
-    #                 elif not has_max_valence[j]: # Atom j is capable of forming a bond.
-    #                     test_state = RWMol(copy.copy(states[i]))
-    #                     test_state.AddBond(nmol_single_act, j, order = self.bond_bank[0]) # Form a hypothetical single bond between the atoms
-    #                     Chem.SanitizeMol(test_state, catchErrors=True)
-    #                     test_state.UpdatePropertyCache()
-    #                     test_ring_info = test_state.GetRingInfo() # Assuming a bond of the smallest order between j and nmol_single_act is formed and has rings
-    #                     if len(test_ring_info.AtomRings()) != 0:
-    #                         test_ring_sizes = [len(ring) for ring in test_ring_info.AtomRings()]
-    #                         if max(test_ring_sizes) > 7: # Ensuring that if a ring is formed by the connection, the ring contains 3 to 7 atoms
-    #                             nfull_mask[j] = 0
-    #
-    #         nfull_masks.append(nfull_mask)
-    #         nfull_mask_bool = nfull_mask.type(torch.BoolTensor)
-    #         nfull_masked = torch.where(nfull_mask_bool, nfull_single, torch.tensor(-1e10))
-    #         nfull_categorical = Categorical(logits = nfull_masked)
-    #         nfull_single_act = nfull_categorical.sample()
-    #         nfull_log_prob += [nfull_categorical.log_prob(nfull_single_act).item()]
-    #         nfull_single_act = nfull_single_act.item()
-    #         nfull_act += [nfull_single_act]
-    #
-    #     t_mask_bool = t_mask.type(torch.BoolTensor)
-    #     t_masked = torch.where(t_mask_bool, t_logits, torch.tensor(-1e10))
-    #     t_categorical = Categorical(logits=t_masked)
-    #     t_act = t_categorical.sample() # Categorical outputs a tensor. Convert to list instead.
-    #     t_log_prob = t_categorical.log_prob(t_act).tolist()
-    #     t_act = t_act.tolist()
-    #
-    #     b_mask = torch.ones(b_logits.size())
-    #
-    #     # 8. Bond cannot be greater than the least remaining valence among the selected atoms
-    #     for i in range(len(states)):
-    #         nmol_valence = self.max_valences[states[i].GetAtomWithIdx(nmol_act[i]).GetSymbol()] - sum([int(bond.GetBondType()) for bond in states[i].GetAtomWithIdx(nmol_act[i]).GetBonds()]) # Calculating remaining valences of nmol and nfull
-    #         if nfull_act[i] >= states[i].GetNumHeavyAtoms(): # Nfull adds an atom to the molecule
-    #             nfull_valence = self.max_valences[self.atom_bank[nfull_act[i] - states[i].GetNumHeavyAtoms()]] # Valence of additional atom is the same as the max valence of that element
-    #         else: # Nfull is in the original molecule
-    #             nfull_valence = self.max_valences[states[i].GetAtomWithIdx(nfull_act[i]).GetSymbol()] - sum([int(bond.GetBondType()) for bond in states[i].GetAtomWithIdx(nmol_act[i]).GetBonds()])
-    #         for j in range(min(nmol_valence, nfull_valence), 3):
-    #             b_mask[i][j] = 0
-    #
-    #     b_mask_bool = b_mask.type(torch.BoolTensor)
-    #     b_masked = torch.where(b_mask_bool, b_logits, torch.tensor(-1e10))
-    #     b_categorical = Categorical(logits = b_masked)
-    #     b_act = b_categorical.sample()
-    #     b_log_prob = b_categorical.log_prob(b_act).tolist()
-    #     b_act = b_act.tolist()
-    #
-    #     return t_act, t_log_prob, t_mask, nmol_act, nmol_log_prob, nmol_masks, nfull_act, nfull_log_prob, nfull_masks, b_act, b_log_prob, b_mask
+        state_idxs, num_nodes = torch.unique(batch.batch, return_counts = True) # Must split the nodes of graphs into separate probability distributions
+        num_full = num_nodes.tolist()
+        num_mol = [num - 10 for num in num_nodes.tolist()] # Nmol excludes atoms from the atom bank
+        nmol_logits = torch.split(nmol_logits, num_mol)
+        nfull_logits = torch.split(nfull_logits, num_full)
+
+        for i, (nmol_single, nfull_single) in enumerate(zip(nmol_logits, nfull_logits)):
+            nmol_categorical = Categorical(logits = nmol_single.squeeze(dim = 1))
+            nmol_action = nmol_categorical.sample()
+            nmol_actions += [nmol_action.item()]
+
+            nfull_categorical = Categorical(logits = nfull_single.squeeze(dim = 1))
+            nfull_action = nfull_categorical.sample()
+            nfull_actions += [nfull_action.item()]
+
+            if return_log_probs: # Must calculate log probabilities in the for loop
+                nmol_log_probs = []
+                nfull_log_probs = []
+                nmol_log_probs += [nmol_categorical.log_prob(nmol_action)]
+                nfull_log_probs += [nfull_categorical.log_prob(nfull_action)]
+
+        # Bond sampling
+        b_categorical = Categorical(logits = b_logits)
+        b_actions = b_categorical.sample()
+        if return_log_probs:
+            b_log_probs = b_categorical.log_prob(b_actions)
+        b_actions = b_actions.tolist()
+
+        # Store all the actions in a dictionary
+        actions = {"t": t_actions, "nmol": nmol_actions, "nfull": nfull_actions, "b": b_actions}
+
+        if return_log_probs: # Store all the log probabilities in a dictionary
+            log_probs = {"t": t_log_probs, "nmol": nmol_log_probs, "nfull": nfull_log_probs, "b": b_log_probs}
+
+        return actions, log_probs
 
 if __name__ == '__main__':
     import rdkit
@@ -318,7 +249,7 @@ if __name__ == '__main__':
     from graph_embedding import batch_from_smiles, batch_from_states, visualize
     import pandas as pd
 
-    surge = SURGE
-    smiles = ['c1ccccc1', 'CC']
+    model = SURGE()
+    smiles = ['c1ccccc1', 'CC', 'CC', 'CC', 'c1ccccc1']
     batch = batch_from_smiles(smiles)
-    print(surge.policy(batch))
+    print(model.act(batch))

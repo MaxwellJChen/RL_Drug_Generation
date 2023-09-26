@@ -1,6 +1,5 @@
 import torch_geometric
 import torch
-import rdkit
 from rdkit import Chem
 import numpy as np
 import copy
@@ -19,9 +18,12 @@ https://arxiv.org/pdf/2012.04444.pdf
 1 is in aromatic system
 """
 
-def draw_mol(mol):
+def visualize(mol):
     """Displays an image of an RDKit molecule"""
-    mol_copy = copy.copy(mol)
+    if isinstance(mol, str):
+        mol_copy = copy.copy(Chem.MolFromSmiles(mol))
+    else:
+        mol_copy = copy.copy(mol)
     for atom in mol_copy.GetAtoms():
         atom.SetProp("molAtomMapNumber", str(atom.GetIdx()))
     img = Draw.MolToImage(mol_copy)
@@ -62,14 +64,14 @@ def get_atom_features(atom):
     """
     # define list of permitted atoms
     permitted_list_of_atoms = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']
+    max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
 
     # compute atom features
-    atom_type_enc = one_hot_encoding(str(atom.GetSymbol()), permitted_list_of_atoms) # 12 one-hot vector specifying type of atom
+    atom_type_enc = one_hot_encoding(str(atom.GetSymbol()), permitted_list_of_atoms) # 10 one-hot vector specifying type of atom
     n_heavy_neighbors_enc = one_hot_encoding(int(atom.GetDegree()), [0, 1, 2, 3, 4, "More"]) # 6 heavy neighbors vector
     n_hydrogens_enc = one_hot_encoding(int(atom.GetTotalNumHs()), [0, 1, 2, 3, 4, "MoreThanFour"]) # 5 Number of hydrogen neighbors vector
     formal_charge_enc = [int(int(atom.GetFormalCharge()) != 0)] # 1 formal charge binary encoding
     is_in_a_ring_enc = [int(atom.IsInRing())] # 1 ring inclusion binary encoding
-    # is_aromatic_enc = [int(atom.GetIsAromatic())] # 1 aromatic binary encoding
     atom_feature_vector = atom_type_enc + n_heavy_neighbors_enc + n_hydrogens_enc + formal_charge_enc + is_in_a_ring_enc
     return np.array(atom_feature_vector)
 
@@ -107,6 +109,7 @@ def batch_from_smiles(all_smiles):
         # convert SMILES to RDKit mol object
         # print(i)
         mol = Chem.MolFromSmiles(smiles)
+        Chem.Kekulize(mol)
 
         # get feature dimensions
         n_nodes = mol.GetNumAtoms()

@@ -71,8 +71,6 @@ def rollout(mol, visualize = False):
     # Start the BFS at carbon atom with the most bonds
     max_bonds = 0 # Stores the number of bonds for the atom with the most bonds
     atom_with_max_bonds = None # Records the atom with the most bonds
-    rollout_valences = [] # Records the valences of all the atoms of all the intermediate steps in rollout
-    valences = {} # Records the valences of a single stage in rollout
     has_carbons = False
     for atom in mol.GetAtoms(): # Test if there are even carbons in the molecule
         if atom.GetSymbol() == 'C':
@@ -90,9 +88,6 @@ def rollout(mol, visualize = False):
             if num_bonds > max_bonds:
                 max_bonds = num_bonds
                 atom_with_max_bonds = atom # Find the atom with the most bonds
-
-    valences[0] = [atom_with_max_bonds.GetSymbol(), 0]
-    rollout_valences.append(copy.deepcopy(valences))
 
     # Pass dictionary into BFS method to retrieve the order of nodes to append
     order = BFS(mol_dict, str(atom_with_max_bonds.GetIdx()))
@@ -114,14 +109,12 @@ def rollout(mol, visualize = False):
     nmol = [] # Lower index of addition
     nfull = [] # Higher index of addition
     bond = [] # Bond index
-    mol_build_step = []
-    mol_build_step += [1]
 
     mol_atoms = [atom for atom in mol.GetAtoms()] # Contains all the atoms in the complete molecule (in a different order from BFS)
+    atom_bank = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']
 
     for i in range(len(order) - 1):
         state.AddAtom(Chem.Atom(mol_atoms[int(order[i + 1])].GetSymbol())) # Add a new atom
-        valences[state.GetNumHeavyAtoms() - 1] = [mol_atoms[int(order[i + 1])].GetSymbol(), 0]
 
         # Check if any of the atoms in the intermediate rollout stage (i.e., already in the graph) should form bonds with the new atom
         neighbors = [] # Contains the indices (from mol_atoms) of the atoms already in the graph that should form bonds with the new atom
@@ -131,17 +124,11 @@ def rollout(mol, visualize = False):
                 neighbors.append(idx)
 
         # Form a new bond
-        for idx in neighbors:
-            b = mol.GetBondBetweenAtoms(int(idx), int(order[i + 1])).GetBondType() # Get the bond between the two molecules in the original molecule
-            state.AddBond(order[:i + 1].index(idx), i + 1, order = b) # Add a bond to the molecule
-
-            # Update valences
-            valences[order[:i + 1].index(idx)][1] += int(b)
-            valences[i + 1][1] += int(b)
+        for j in range(len(neighbors)):
+            b = mol.GetBondBetweenAtoms(int(neighbors[j]), int(order[i + 1])).GetBondType() # Get the bond between the two molecules in the original molecule
+            state.AddBond(order[:i + 1].index(neighbors[j]), i + 1, order = b) # Add a bond to the molecule
 
             # Update variables containing entirety of rollout
-            rollout_valences.append(copy.deepcopy(valences))
-            mol_build_step += [max(mol_build_step) + 1]
             state.UpdatePropertyCache()
             states.append(copy.copy(state))
 
@@ -152,19 +139,22 @@ def rollout(mol, visualize = False):
 
             # Update supervised learning data
             terminate += [0]
-            nmol.append(order[:i + 1].index(idx))
-            nfull.append(i + 1)
-            bond.append(int(mol.GetBondBetweenAtoms(int(idx), int(order[i + 1])).GetBondType()) - 1)
+            nmol.append(order[:i + 1].index(neighbors[j]))
+
+            if j == 0:
+                nfull.append(state.GetNumHeavyAtoms() + atom_bank.index(Chem.Atom(mol_atoms[int(order[i + 1])]).GetSymbol()) - 1)
+            else:
+                nfull.append(i + 1)
+            bond.append(int(mol.GetBondBetweenAtoms(int(neighbors[j]), int(order[i + 1])).GetBondType()) - 1)
 
     terminate += [1]
     nmol += [0]
     nfull += [0]
     bond += [0]
 
-    return terminate, nmol, nfull, bond, states, rollout_valences, mol_build_step
+    return terminate, nmol, nfull, bond, states
 
 if __name__ == '__main__':
-    from mol_env import single_mol_env
-    # terminate, mol, full, bond, states, rollout_valences, mol_build_step = rollout(Chem.MolFromSmiles('c1ccccc1'))
+    # terminate, mol, full, bond, states = rollout(Chem.MolFromSmiles('c1ccccc1'))
     mol = Chem.MolFromSmiles('c1ccccc1')
     print(type(mol))
