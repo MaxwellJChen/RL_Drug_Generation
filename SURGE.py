@@ -192,11 +192,15 @@ class SURGE(nn.Module):
         t_actions = t_categorical.sample()
         if return_log_probs: # Record the log probabilities if specified
             t_log_probs = t_categorical.log_prob(t_actions)
-        t_actions = t_actions
+        t_actions = t_actions.tolist()
 
         # Nmol and nfull sampling
         nmol_actions = [] # Initialize lists to hold actions for both nmol and nfull
         nfull_actions = []
+
+        if return_log_probs:
+            nmol_log_probs = []
+            nfull_log_probs = []
 
         state_idxs, num_nodes = torch.unique(batch.batch, return_counts = True) # Must split the nodes of graphs into separate probability distributions
         num_full = num_nodes.tolist()
@@ -214,8 +218,6 @@ class SURGE(nn.Module):
             nfull_actions += [nfull_action.item()]
 
             if return_log_probs: # Must calculate log probabilities in the for loop
-                nmol_log_probs = []
-                nfull_log_probs = []
                 nmol_log_probs += [nmol_categorical.log_prob(nmol_action)]
                 nfull_log_probs += [nfull_categorical.log_prob(nfull_action)]
 

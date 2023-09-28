@@ -20,7 +20,7 @@ Pseudocode:
 """
 
 """Initialize Variables"""
-smiles = list(pd.read_csv('/Users/maxwellchen/PycharmProjects/RL_Drug_Generation/Imitation_Learning/in_trials_filtered.csv')['smiles'])
+smiles = list(pd.read_csv('/Data/in_trials_filtered.csv')['smiles'])
 valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
 
 # Specify model and learning algorithm parameters
