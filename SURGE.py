@@ -221,6 +221,9 @@ class SURGE(nn.Module):
                 nmol_log_probs += [nmol_categorical.log_prob(nmol_action)]
                 nfull_log_probs += [nfull_categorical.log_prob(nfull_action)]
 
+        nmol_log_probs = torch.hstack(nmol_log_probs)
+        nfull_log_probs = torch.hstack(nfull_log_probs)
+
         # Bond sampling
         b_categorical = Categorical(logits = b_logits)
         b_actions = b_categorical.sample()

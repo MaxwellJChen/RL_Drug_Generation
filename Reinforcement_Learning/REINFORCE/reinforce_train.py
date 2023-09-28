@@ -8,35 +8,63 @@ import numpy as np
 
 model = SURGE()
 max_steps = 100
-num_envs = 2
+num_envs = 4
+gamma = 0.99
+eps = np.finfo(np.float32).eps.item()
 env = vectorized_mol_env(num_envs = num_envs, max_steps = max_steps)
 optimizer = Adam(params = model.parameters())
 
+torch.autograd.set_detect_anomaly(True)
+
 # Training loop
-
-
-
 saved_actions = {'t': [], 'nmol': [], 'nfull': [], 'b': []}
 saved_log_probs = {'t': [], 'nmol': [], 'nfull': [], 'b': []}
+keys = ['t', 'nmol', 'nfull', 'b']
 saved_rewards = []
 
-def select_action(states):
-    batch = batch_from_states(states)
-    actions, log_probs = model.act(batch, return_log_probs = True)
-    for key in ['t', 'nmol', 'nfull', 'b']:
-        saved_actions[key] += actions[key]
-        saved_log_probs[key] += log_probs[key]
+num_epochs = 20
+for epoch in range(num_epochs):
+    states = env.reset()
+    for step in range(max_steps):
+        # Act
+        batch = batch_from_states(states)
+        actions, log_probs = model.act(batch, return_log_probs = True)
+        for key in keys: # Record actions in dictionaries
+            # No actions have been recorded. Multidimensional concatenation will return error.
+            if step == 0:
+                saved_actions[key] = actions[key]
+                saved_log_probs[key] = log_probs[key]
+            else:
+                saved_actions[key] = np.vstack((saved_actions[key], actions[key]))
+                saved_log_probs[key] = torch.vstack((saved_log_probs[key], log_probs[key]))
 
-    return actions
+        # Step
+        states, rewards, valids, timestep = env.step(actions['t'], actions['nmol'], actions['nfull'], actions['b'])
+        if step == 0: # Record rewards
+            saved_rewards = torch.tensor(rewards)
+        else:
+            saved_rewards = torch.vstack((saved_rewards, torch.tensor(rewards)))
 
-states = env.reset()
-print(select_action(states))
-print(saved_actions)
-print(saved_log_probs)
-print(np.vstack((saved_actions['t'], saved_actions['nmol'])))
+    # Calculate returns
+    saved_returns = torch.tensor(num_envs)
+    returns = torch.zeros(num_envs)
+    for idx in reversed(range(max_steps)):
+        returns = saved_rewards[idx, :] + gamma * returns
+        if idx == max_steps - 1:
+            saved_returns = returns
+        else:
+            saved_returns = torch.vstack((returns, saved_returns))
+    saved_returns = (saved_returns - saved_returns.mean()) / (saved_returns.std() + eps)
 
-# for i in range(2):
-#     # actions = select_action(states)
-#     print(saved_log_probs)
-#     states, rewards, valids, timestep = env.step(actions['t'], actions['nmol'], actions['nfull'], actions['b'])
-#     saved_rewards.append(rewards)
+    # Calculate loss
+    cumulative_loss = 0
+    for key in keys:
+        individual_loss = -1 * saved_returns * saved_log_probs[key]
+        cumulative_loss += torch.sum(individual_loss)
+
+    # Perform gradient ascent
+    optimizer.zero_grad()
+    cumulative_loss.backward()
+    optimizer.step()
+
+    print(cumulative_loss)
