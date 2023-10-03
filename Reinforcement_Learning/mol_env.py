@@ -210,16 +210,20 @@ class vectorized_mol_env():
 
         return self.states
 
-    def _score(self, i):
+    def _score(self, i, version = ''):
         """
-        Calculates the score of a molecule
+        Calculates the score of a molecule. Different versions based on input argument version.
         """
         qed = QED.weights_mean(self.states[i]) # From 0 to 1 where 1 is the most drug-like
         sas = sascorer.calculateScore(self.states[i]) # From 1 to 10 where 1 is the easiest to synthesize
         sas = (sas - 1)/9 # Normalized from 0 to 1
         sas = 1 - sas # Transformed so that more accessible molecules have a higher score
 
-        return 0.5 * qed + 0.5 * sas + self.states[i].GetNumHeavyAtoms()/self.max_mol_size # Additional term to reward larger molecules
+        if version == 't':
+            return 0.1 * qed + 0.1 * sas + 3 * self.states[i].GetNumHeavyAtoms() / self.max_mol_size
+        else:
+            # Additional term to reward larger molecules
+            return 0.5 * qed + 0.5 * sas + self.states[i].GetNumHeavyAtoms()/self.max_mol_size
 
     def _update(self, nmol, nfull, bond, i):
         """
@@ -301,7 +305,7 @@ class vectorized_mol_env():
 
         return valids
 
-    def step(self, terminate, nmol, nfull, bond):
+    def step(self, terminate, nmol, nfull, bond, version = ''):
         """
         Given an action, updates each of the states accordingly.
         If one of the states terminates, it automatically resets to a new initial state.
@@ -315,14 +319,14 @@ class vectorized_mol_env():
         for i in range(self.num_envs):
             if terminate[i] == 1 or self.mol_sizes[i] == self.max_mol_size or self.timestep == self.max_steps: # Reset if model decides to terminate, the molecules hit the maximum size, or the max number of timesteps is reached
                 if self.states[i].GetNumHeavyAtoms() != 1:
-                    rewards[i] = self._score(i)
+                    rewards[i] = self._score(i, version)
                 else:
                     rewards[i] = self.states[i].GetNumHeavyAtoms()/self.max_mol_size
                 self.states[i] = RWMol()
                 self.states[i].AddAtom(Chem.Atom('C'))
             elif valids[i]: # Valid action
                 self.states[i] = self._update(nmol, nfull, bond, i)
-                rewards[i] = self._score(i)
+                rewards[i] = self._score(i, version)
             else: # Invalid action
                 rewards[i] = 0
 

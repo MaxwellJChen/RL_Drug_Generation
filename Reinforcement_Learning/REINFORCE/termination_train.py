@@ -8,15 +8,7 @@ import numpy as np
 
 import wandb
 
-"""
-SURGE training with the REINFORCE algorithm. Intended for baseline testing and establishing
-an efficient pipeline for more complex testing and architectures later.
-
-The file can be split into 3 sections:
-    1. Parameter Initialization & Configs
-    2. Training Loop
-    3. Loss Calculation & Gradient Ascent
-"""
+"""Training termination model first for curriculum learning effect."""
 
 # 1. Parameter Initialization & Configs
 model = SURGE()
@@ -30,16 +22,15 @@ gamma = 0.99
 eps = np.finfo(np.float32).eps.item() # Small constant to decrease numerical instability
 num_epochs = 20
 
-wandb.init(
-    project = 'RL_Drug_Generation',
-    name= f'Test',
-    config={
-        'lr': lr,
-        'architecture': "CNN",
-        'epochs': num_epochs,
-        'gamma': gamma,
-        'num_envs': num_envs
-    })
+# wandb.init(
+#     project = 'RL_Drug_Generation',
+#     name= f'Termination_Test',
+#     config={
+#         'lr': lr,
+#         'epochs': num_epochs,
+#         'gamma': gamma,
+#         'num_envs': num_envs
+#     })
 
 
 # 2. Training Loop
@@ -49,9 +40,9 @@ for epoch in range(num_epochs):
     states = env.reset()
 
     # Episode loggers
-    keys = ['t', 'nmol', 'nfull', 'b']
-    saved_actions = {'t': [], 'nmol': [], 'nfull': [], 'b': []}
-    saved_log_probs = {'t': [], 'nmol': [], 'nfull': [], 'b': []}
+    keys = ['t']
+    saved_actions = []
+    saved_log_probs = []
     saved_rewards = []
 
     # Episode computation
@@ -62,13 +53,12 @@ for epoch in range(num_epochs):
         actions, log_probs = model.act(batch, return_log_probs = True)
 
         # Record in episode loggers
-        for key in keys:
-            if step == 0:
-                saved_actions[key] = actions[key]
-                saved_log_probs[key] = log_probs[key]
-            else:
-                saved_actions[key] = np.vstack((saved_actions[key], actions[key]))
-                saved_log_probs[key] = torch.vstack((saved_log_probs[key], log_probs[key]))
+        if step == 0:
+            saved_actions = actions['t']
+            saved_log_probs = log_probs['t']
+        else:
+            saved_actions = np.vstack((saved_actions, actions['t']))
+            saved_log_probs = torch.vstack((saved_log_probs, log_probs['t']))
 
         # Take a step in environment
         states, rewards, valids, timestep = env.step(actions['t'], actions['nmol'], actions['nfull'], actions['b'])
@@ -94,24 +84,15 @@ for epoch in range(num_epochs):
     all_returns = (all_returns - all_returns.mean()) / (all_returns.std() + eps)
 
     # Calculate loss
-    all_loss = dict()
-    cumulative_loss = 0
-    for key in keys:
-
-        # Find the average loss among vectorized environments for each SURGE component
-        individual_loss = -1 * all_returns * saved_log_probs[key] / num_envs
-        cumulative_loss += torch.sum(individual_loss)
-        all_loss[key] = torch.sum(individual_loss)
+    loss = torch.sum(-1 * all_returns * saved_log_probs / num_envs)
 
     # Perform gradient ascent
     optimizer.zero_grad()
-    cumulative_loss.backward()
+    loss.backward()
     optimizer.step()
 
-    print(cumulative_loss)
+    print(loss)
 
-    wandb.log({"Cumulative Reward": cumulative_reward, "Cumulative Loss": cumulative_loss,
-               "Termination Loss": all_loss['t'], "Nmol Loss": all_loss['nmol'],
-               "Nfull Loss": all_loss['nfull'], "Bond Loss": all_loss['b']})
+    # wandb.log({"Cumulative Reward": cumulative_reward, "Termination Loss": loss})
 
-wandb.finish()
+# wandb.finish()
