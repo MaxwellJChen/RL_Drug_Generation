@@ -4,8 +4,8 @@ import pandas as pd
 import random
 
 from rollout import rollout
-from SURGE import SURGE
-from graph_embedding import batch_from_smiles
+from Model.SURGE import SURGE
+from Model.graph_embedding import batch_from_smiles
 
 random.seed(1)
 
@@ -19,7 +19,7 @@ Pseudocode:
     6. Update model
 """
 
-"""Initialize Variables"""
+# 1. Initialize variables
 smiles = list(pd.read_csv('/Data/in_trials_filtered.csv')['smiles'])
 valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
 
@@ -28,8 +28,6 @@ sample = batch_from_smiles([smiles[0]])
 SURGE = SURGE(num_node_features = sample.num_node_features)
 lr = 1e-6
 optimizer = optim.Adam(SURGE.parameters(), lr = lr)
-
-record_every = 100 # How many trials until recording a video of model performance
 
 # Training loop parameters
 epochs = 20
@@ -40,7 +38,7 @@ keys = ['terminate', 'nmol', 'nfull', 'bond', 'state']
 
 smiles = smiles[:10]
 
-"""Get Minibatches"""
+# 2. Get minibatches
 i = 0
 while i < len(smiles):
     while len(minibatch['terminate']) < minibatch_size:  # If size of minibatch surpasses minibatch size after adding rollout steps of a molecule, stop decomposing more molecules

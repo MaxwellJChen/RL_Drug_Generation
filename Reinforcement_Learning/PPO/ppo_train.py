@@ -1,9 +1,9 @@
 import numpy as np
 
-from SURGE import SURGE
+from Model.SURGE import SURGE
 from Reinforcement_Learning.mol_env import mol_env
 
-from graph_embedding import batch_from_states
+from Model.graph_embedding import batch_from_states
 
 import torch
 

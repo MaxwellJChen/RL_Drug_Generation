@@ -102,7 +102,7 @@ def rollout(mol, visualize = False):
     states.append(copy.copy(state))
 
     if visualize == True:
-        t = 1 # Iterator
+        t = 1 # Iterator for visualizing
         visualize_rollout(state, t)
 
     terminate = []
@@ -152,9 +152,17 @@ def rollout(mol, visualize = False):
     nfull += [0]
     bond += [0]
 
-    return terminate, nmol, nfull, bond, states
+    actions = dict()
+    actions['t'] = terminate
+    actions['nmol'] = nmol
+    actions['nfull'] = nfull
+    actions['b'] = bond
+
+    return actions, states
 
 if __name__ == '__main__':
-    # terminate, mol, full, bond, states = rollout(Chem.MolFromSmiles('c1ccccc1'))
-    mol = Chem.MolFromSmiles('c1ccccc1')
-    print(type(mol))
+    actions, states = rollout(Chem.MolFromSmiles('CN1C=NC2=C1C(=O)N(C(=O)N2C)C'))
+    print(actions)
+    print(states)
+    # mol = Chem.MolFromSmiles('c1ccccc1')
+    # print(type(mol))

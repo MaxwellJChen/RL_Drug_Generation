@@ -1,8 +1,8 @@
 import torch
 from torch.optim import Adam
-from SURGE import SURGE
+from Model.SURGE import SURGE
 from Reinforcement_Learning.mol_env import vectorized_mol_env
-from graph_embedding import batch_from_states
+from Model.graph_embedding import batch_from_states
 
 import numpy as np
 
