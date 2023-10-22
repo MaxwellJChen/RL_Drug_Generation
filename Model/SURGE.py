@@ -34,8 +34,14 @@ def graph_mean(tensor, num_nodes):
 
 def graph_std(tensor, num_nodes):
     tensor = torch.split(tensor, num_nodes.tolist())
-    tensor_std = [torch.std(torch.flatten(t)) for t in tensor]
-    tensor_std = torch.tensor(tensor_std).view(len(tensor_std), 1)
+    tensor_std = []
+    for t in tensor:
+        if len(t) == 1:
+            tensor_std.append(t * 0)
+        else:
+            tensor_std.append(torch.std(torch.flatten(t)))
+    tensor_std = torch.tensor(tensor_std)
+    tensor_std = tensor_std.view(len(tensor_std), 1)
     return tensor_std
 
 class SURGE(nn.Module):
