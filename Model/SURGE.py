@@ -70,7 +70,7 @@ class SURGE(nn.Module):
         self.b_fcn2 = nn.Linear(16, 3)
 
         # Termination
-        self.t_fcn1 = nn.Linear(policy_hidden_dim + 2 + 2 + 2, 2)
+        self.t_fcn1 = nn.Linear(policy_hidden_dim + 2 + 2 + 2 + 1, 2)
 
         # Value
         self.v_conv1 = GATv2Conv(num_node_features, 64)
@@ -191,8 +191,9 @@ class SURGE(nn.Module):
         b_std = torch.std(bond, dim=1).view(len(num_nodes), 1)
 
         p = global_mean_pool(p_x, batch.batch)
+        num_nodes = (num_nodes - 10).view(len(num_nodes), 1)
 
-        p_t = torch.cat((p, nmol_mean, nmol_std, nfull_mean, nfull_std, b_mean, b_std), dim=1)
+        p_t = torch.cat((p, nmol_mean, nmol_std, nfull_mean, nfull_std, b_mean, b_std, num_nodes), dim=1)
 
         t = self.t_fcn1(p_t)
         t = nn.LeakyReLU(0.2)(t)
