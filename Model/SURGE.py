@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
-from torch_geometric.nn import GatedGraphConv, global_mean_pool, GATv2Conv, global_add_pool
+from torch_geometric.nn import GATv2Conv, global_add_pool, global_mean_pool, BatchNorm
 import rdkit.Chem as Chem
 
 import numpy as np
@@ -53,24 +53,28 @@ class SURGE(nn.Module):
         super(SURGE, self).__init__()
 
         # Policy embedder
-        self.p_conv1 = GATv2Conv(num_node_features, 64)
-        self.p_conv2 = GATv2Conv(64, 64)
-        self.p_conv3 = GATv2Conv(64, policy_hidden_dim)
+        self.p_conv1 = GATv2Conv(num_node_features, 64, heads=3)
+        self.p_bnorm1 = BatchNorm(64*3)
+        self.p_conv2 = GATv2Conv(64*3, 64, head=3)
+        self.p_bnorm2 = BatchNorm(64)
+        self.p_conv3 = GATv2Conv(64, policy_hidden_dim, head=3)
+        self.p_bnorm3 = BatchNorm(policy_hidden_dim)
 
         # Nmol
-        self.nmol_fcn1 = nn.Linear(policy_hidden_dim, 16)
-        self.nmol_fcn2 = nn.Linear(16, 1)
+        self.nmol_fcn1 = nn.Linear(policy_hidden_dim, 32)
+        self.nmol_fcn2 = nn.Linear(32, 16)
+        self.nmol_fcn3 = nn.Linear(16, 1)
 
         # Nfull
         self.nfull_fcn1 = nn.Linear(policy_hidden_dim + 1, 16)
         self.nfull_fcn2 = nn.Linear(16, 1)
 
         # Bond
-        self.b_fcn1 = nn.Linear(policy_hidden_dim * 3, 16)
+        self.b_fcn1 = nn.Linear(policy_hidden_dim*3, 16)
         self.b_fcn2 = nn.Linear(16, 3)
 
         # Termination
-        self.t_fcn1 = nn.Linear(policy_hidden_dim + 2 + 2 + 2 + 1, 2)
+        self.t_fcn1 = nn.Linear(policy_hidden_dim*3 + 3 + 2 + 2 + 2 + 1, 2)
 
         # Value
         self.v_conv1 = GATv2Conv(num_node_features, 64)
@@ -91,20 +95,21 @@ class SURGE(nn.Module):
         """
         Embeds a given graph for policy training.
         """
-
         p_x = self.p_conv1(batch.x, batch.edge_index)
+        p_x = self.p_bnorm1(p_x)
         p_x = nn.LeakyReLU(0.2)(p_x)
         p_x = self.p_conv2(p_x, batch.edge_index)
+        p_x = self.p_bnorm2(p_x)
         p_x = nn.LeakyReLU(0.2)(p_x)
         p_x = self.p_conv3(p_x, batch.edge_index)
+        p_x = self.p_bnorm3(p_x)
         p_x = nn.LeakyReLU(0.2)(p_x)
         return p_x
 
-    def nmol(self, batch, p_x):
+    def nmol(self, states, batch, p_x):
         """
         Calculates the unnormalized probability that each of the atoms already in the molecule should form a bond.
         """
-
         state_idxs, num_nodes = torch.unique(batch.batch, return_counts=True)
         nmol = torch.split(p_x, num_nodes.tolist())
         nmol = [n[:-10] for n in nmol]
@@ -113,16 +118,17 @@ class SURGE(nn.Module):
         nmol = nn.LeakyReLU(0.2)(nmol)
         nmol = self.nmol_fcn2(nmol)
         nmol = nn.LeakyReLU(0.2)(nmol)
+        nmol = self.nmol_fcn3(nmol)
+        nmol = nn.LeakyReLU(0.2)(nmol)
         nmol = graph_softmax(nmol, num_nodes - 10)
 
         return nmol
 
-    def nfull(self, batch, p_x, nmol):
+    def nfull(self, states, batch, p_x, nmol):
         """
         Calculates the unnormalized probability that a pre-existing atom or an atom from the atom bank should form
         a bond based on the probabilities from Nmol.
         """
-
         atom_bank_nmol = torch.full((10, 1), -1, dtype=torch.float32) # -1 signifying atom belongs to atom bank
         state_idxs, num_nodes = torch.unique(batch.batch, return_counts=True)
         nmol = torch.split(nmol, (num_nodes - 10).tolist())
@@ -139,12 +145,11 @@ class SURGE(nn.Module):
 
         return nfull
 
-    def bond(self, batch, p_x, nmol, nfull):
+    def bond(self, states, batch, p_x, nmol, nfull):
         """
         Given the node embeddings and the predicted probabilities from Nmol and Nfull, creates an unnormalized
         probability mass function of bonds.
         """
-
         # Perform a weighted sum of nodes based on probabilities from Nmol
         state_idxs, num_nodes = torch.unique(batch.batch, return_counts=True)
         p_x_nmol = torch.split(p_x, num_nodes.tolist())
@@ -173,15 +178,13 @@ class SURGE(nn.Module):
         b = self.b_fcn2(b)
         b = nn.LeakyReLU(0.2)(b)
         b = F.softmax(b, dim=1)
+        return b, p_bond
 
-        return b
-
-    def termination(self, batch, p_x, nmol, nfull, bond):
+    def termination(self, states, batch, p_bond, nmol, nfull, bond):
         """
         Given the confidence of the Bond, Nmol, and Nfull predictions and a graph embedding, decides whether or not
         to termination generation based on mean and std of probability distributions.
         """
-
         state_idxs, num_nodes = torch.unique(batch.batch, return_counts=True)
         nmol_mean = graph_mean(nmol, num_nodes - 10)
         nmol_std = graph_std(nmol, num_nodes - 10)
@@ -190,10 +193,9 @@ class SURGE(nn.Module):
         b_mean = torch.mean(bond, dim=1).view(len(num_nodes), 1)
         b_std = torch.std(bond, dim=1).view(len(num_nodes), 1)
 
-        p = global_mean_pool(p_x, batch.batch)
         num_nodes = (num_nodes - 10).view(len(num_nodes), 1)
 
-        p_t = torch.cat((p, nmol_mean, nmol_std, nfull_mean, nfull_std, b_mean, b_std, num_nodes), dim=1)
+        p_t = torch.cat((p_bond, bond, nmol_mean, nmol_std, nfull_mean, nfull_std, b_mean, b_std, num_nodes), dim=1)
 
         t = self.t_fcn1(p_t)
         t = nn.LeakyReLU(0.2)(t)
@@ -201,12 +203,12 @@ class SURGE(nn.Module):
 
         return t
 
-    def policy(self, batch):
+    def policy(self, states, batch):
         p_x = self.policy_embed(batch)
-        nmol = self.nmol(batch, p_x)
-        nfull = self.nfull(batch, p_x, nmol)
-        b = self.bond(batch, p_x, nmol, nfull)
-        t = self.termination(batch, p_x, nmol, nfull, b)
+        nmol = self.nmol(states, batch, p_x)
+        nfull = self.nfull(states, batch, p_x, nmol)
+        b, p_bond = self.bond(states, batch, p_x, nmol, nfull)
+        t = self.termination(states, batch, p_bond, nmol, nfull, b)
 
         return t, nmol, nfull, b
 
@@ -234,13 +236,13 @@ class SURGE(nn.Module):
 
         return v
 
-    def forward(self, batch):
-        t, nmol, nfull, b = self.policy(batch)
+    def forward(self, states, batch):
+        t, nmol, nfull, b = self.policy(states, batch)
         v = self.value(batch)
 
         return t, nmol, nfull, b, v
 
-    def act(self, batch):
+    def act(self, states, batch):
         """
         Returns a dictionary of actions for Termination, Nmol, Nfull, and Bond. These actions can be processed
         by the MolEnv to update a molecule. The actions are based on the probabilities returned by the forward
@@ -251,7 +253,7 @@ class SURGE(nn.Module):
         """
 
         # Obtain probabilities for the 4 separate probability distributions
-        t, nmol, nfull, b = self.policy(batch)
+        t, nmol, nfull, b = self.policy(states, batch)
 
         # Termination sampling
         t_categorical = Categorical(t)
@@ -313,11 +315,18 @@ if __name__ == '__main__':
     import torch
     import torch
     import torch.nn as nn
-    from Model.graph_embedding import batch_from_smiles
+    from Model.graph_embedding import batch_from_smiles, batch_from_states
+    from Reinforcement_Learning.mol_env import vectorized_mol_env
 
     model = SURGE()
     smiles = ['c1ccccc1', 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C'] # 6 atoms in benzene, 24 in caffeine
     batch = batch_from_smiles(smiles)
-    print(model.act(batch))
     model.eval()
-    print(model.act(batch))
+    env = vectorized_mol_env(max_steps = 200)
+    states = env.reset()
+    for i in range(1, 301):
+        actions = model.act(batch_from_states(states))
+        states, rewards, valids, timestep = env.step(actions['t'], actions['nmol'], actions['nfull'], actions['b'])
+        print(f'{i}:\t{rewards}\t{states}')
+        if i % 200 == 0:
+            states = env.reset()

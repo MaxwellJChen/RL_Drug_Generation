@@ -2,7 +2,7 @@ import torch
 from rdkit import Chem
 from rdkit.Chem import RWMol
 import copy
-from graph_embedding import visualize
+from Model.graph_embedding import visualize
 
 """
 Helper functions for invalid action masking SURGE probability distributions during SURGE acting, supervised learning, and reinforcement learning.
@@ -133,7 +133,7 @@ def b_mask(state, nmol: int, nfull: int):
 
     return b_mask
 
-def mask(state, nmol: int, nfull: int):
+def mask(state, nmol, nfull):
     """
     Accepts a state (kekulized Mol or RWMol) and returns the masking for the probability distribution of the state. Must include nmol to mask nfull.
 

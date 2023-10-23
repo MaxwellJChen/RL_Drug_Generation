@@ -2,6 +2,8 @@
 import rdkit.Chem as Chem
 from rdkit.Chem import RWMol
 from rdkit.Chem import Draw
+from rdkit.Chem import Descriptors # MW
+import numpy as np
 import rdkit.Chem.QED as QED # QED
 from rdkit.Chem import RDConfig # SAS
 import os
@@ -18,15 +20,22 @@ class vectorized_mol_env():
     """
     Vectorized environment for SURGE training.
     """
-
     def __init__(self, num_envs = 4, max_mol_size = 100, max_steps = 100):
         self.num_envs = num_envs
         self.states = []
 
         self.atom_bank = [Chem.Atom(symbol) for symbol in ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']]
-        self.bond_bank = [Chem.BondType.SINGLE, Chem.BondType.DOUBLE, Chem.BondType.TRIPLE] # No aromatic bonds. All molecules are kekulized.
+        # No aromatic bonds. All molecules are kekulized.
+        self.bond_bank = [Chem.BondType.SINGLE, Chem.BondType.DOUBLE, Chem.BondType.TRIPLE]
 
-        self.max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3} # Max valences of the atoms in the atom bank
+        # Max valences of the atoms in the atom bank
+        self.max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
+
+        # Represent general guidelines on range of acceptable molecular weights
+        self.mw_std = 75 # Not an actual standard deviation but acts similarly to a standard deviation for mw score
+        self.mw_mean = 300
+        self.max_mw = 1000
+        self.mol_mws = []
 
         self.mol_sizes = []
         self.max_mol_size = max_mol_size
@@ -38,36 +47,40 @@ class vectorized_mol_env():
         """
         Provides the initial observation and resets all states to carbon atoms if not otherwise specified.
         """
-
         smiles = args
         if len(smiles) == 0: # When no smiles are specified, default to a carbon atom
             self.states = [RWMol() for _ in range(self.num_envs)]
             for i in range(self.num_envs):
                 self.states[i].AddAtom(Chem.Atom('C'))
+                self.states[i].UpdatePropertyCache()
         else:
             smiles = args[0]
             self.states = [RWMol(Chem.MolFromSmiles(smiles[i])) for i in range(self.num_envs)]
             for i in range(self.num_envs):
                 Chem.Kekulize(self.states[i])
+                self.states[i].UpdatePropertyCache()
 
         self.mol_sizes = [state.GetNumHeavyAtoms() for state in self.states]
+        self.mol_mws = [Descriptors.MolWt(state) for state in self.states]
+        self.timestep = 1
 
         return self.states
 
-    def _score(self, i, version = ''):
+    def _score(self, i):
         """
-        Calculates the score of a molecule. Different versions based on input argument version.
+        Calculates the final chemical score of a molecule. All intermediate scores are from -2 to 2.
         """
-        qed = QED.weights_mean(self.states[i]) # From 0 to 1 where 1 is the most drug-like
+        qed = 4 * (QED.weights_mean(self.states[i]) - 0.5) # From -2 to 2 where 2 is the most drug-like
+
         sas = sascorer.calculateScore(self.states[i]) # From 1 to 10 where 1 is the easiest to synthesize
-        sas = (sas - 1)/9 # Normalized from 0 to 1
+        sas = 4/9 * (sas - 5.5) # Scaled from -2 to 2
         sas = 1 - sas # Transformed so that more accessible molecules have a higher score
 
-        if version == 't':
-            return 0.1 * qed + 0.1 * sas + 3 * self.states[i].GetNumHeavyAtoms() / self.max_mol_size
-        else:
-            # Additional term to reward larger molecules
-            return 0.5 * qed + 0.5 * sas + self.states[i].GetNumHeavyAtoms()/self.max_mol_size
+        # Molecular weight score linearly decreases as weight deviates from mean and is between -2 and 2
+        mw = Descriptors.MolWt(self.states[i])
+        mw = max(-2, -np.abs(mw - self.mw_mean)/self.mw_std + 2)
+
+        return qed + sas + mw
 
     def _update(self, nmol, nfull, bond, i):
         """
@@ -108,7 +121,8 @@ class vectorized_mol_env():
             elif nmol[i] == nfull[i]: # 2. Cannot form a bond between the same atom
                 valids[i] = False
                 continue
-            elif nfull[i] < self.mol_sizes[i] and self.states[i].GetBondBetweenAtoms(nmol[i], nfull[i]) is not None: # 3. Cannot form a bond between atoms that already have a bond
+            # 3. Cannot form a bond between atoms that already have a bond
+            elif nfull[i] < self.mol_sizes[i] and self.states[i].GetBondBetweenAtoms(nmol[i], nfull[i]) is not None:
                 valids[i] = False
                 continue
             else:
@@ -149,7 +163,7 @@ class vectorized_mol_env():
 
         return valids
 
-    def step(self, terminate, nmol, nfull, bond, version = ''):
+    def step(self, terminate, nmol, nfull, bond):
         """
         Given an action, updates each of the states accordingly.
         If one of the states terminates, it automatically resets to a new initial state.
@@ -161,20 +175,31 @@ class vectorized_mol_env():
         rewards = [0 for _ in range(self.num_envs)]
 
         for i in range(self.num_envs):
-            if terminate[i] == 1 or self.mol_sizes[i] == self.max_mol_size or self.timestep == self.max_steps: # Reset if model decides to terminate, the molecules hit the maximum size, or the max number of timesteps is reached
-                if self.states[i].GetNumHeavyAtoms() != 1:
-                    rewards[i] = self._score(i, version)
+
+            # Reset if model decides to terminate, molecules hit maximum size or weight, or max number of timesteps is reached
+            if terminate[i] == 1 or self.mol_sizes[i] >= self.max_mol_size or self.mol_mws[i] >= self.max_mw or self.timestep >= self.max_steps:
+
+
+                if self.states[i].GetNumHeavyAtoms() == 1:
+                    # Return lowest chemical score possible if state is a single carbon atom
+                    rewards[i] = -6
                 else:
-                    rewards[i] = self.states[i].GetNumHeavyAtoms()/self.max_mol_size
+                    rewards[i] = self._score(i)
+
+                # Reset environment to single carbon atom
                 self.states[i] = RWMol()
                 self.states[i].AddAtom(Chem.Atom('C'))
-            elif valids[i]: # Valid action
+                self.states[i].UpdatePropertyCache()
+
+            # Score the step based on action validity and molecular weight
+            elif valids[i]:
                 self.states[i] = self._update(nmol, nfull, bond, i)
-                rewards[i] = self._score(i, version)
+                rewards[i] = 0.5 + max(0, (-np.abs(self.mol_mws[i] - self.mw_mean)/self.mw_std + 1))/10
             else: # Invalid action
-                rewards[i] = 0
+                rewards[i] = -0.5 + max(0, (-np.abs(self.mol_mws[i] - self.mw_mean)/self.mw_std + 1))/10
 
         self.mol_sizes = [state.GetNumHeavyAtoms() for state in self.states]
+        self.mol_mws = [Descriptors.MolWt(state) for state in self.states]
 
         return self.states, rewards, valids, self.timestep
 
@@ -189,7 +214,8 @@ class vectorized_mol_env():
             img = Draw.MolToImage(state_copy)
             plt.imshow(img)
             plt.axis('off')
-            plt.text(x = 0, y = 1, s = f'Env: {i + 1}\nTimestep: {self.timestep}', size = 'large', transform = plt.gca().transAxes)
+            plt.text(x = 0, y = 1, s = f'Env: {i + 1}\nTimestep: {self.timestep}',
+                     size = 'large', transform = plt.gca().transAxes)
             plt.show()
 
 class single_mol_env():
@@ -347,7 +373,6 @@ class single_mol_env():
         plt.axis('off')
         plt.text(x = 0, y = 1, s = f'Timestep: {self.timestep}', size = 'large', transform = plt.gca().transAxes)
         plt.show()
-
 
 if __name__ == '__main__':
     mol_env = single_mol_env()
