@@ -1,6 +1,6 @@
 import numpy as np
 
-from Model.SURGE import SURGE
+from Model.masked_model import SURGE
 from Reinforcement_Learning.mol_env import mol_env
 
 from Model.graph_embedding import batch_from_states

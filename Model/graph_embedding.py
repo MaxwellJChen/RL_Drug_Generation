@@ -153,5 +153,62 @@ def batch_from_states(states):
     """
     Accepts a list of RWMol objects. Outputs a batch of embedded graphs with atom bank.
     """
-    smiles = [Chem.MolToSmiles(state) for state in states]
-    return batch_from_smiles(smiles)
+
+    data_list = []
+
+    atom_bank = torch.FloatTensor(
+        [[1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+         [0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.]]
+    )
+
+    for i, mol in enumerate(states):
+
+        # convert SMILES to RDKit mol object
+        # print(i)
+        Chem.Kekulize(mol)
+
+        # get feature dimensions
+        n_nodes = mol.GetNumAtoms()
+        n_edges = 2 * mol.GetNumBonds()
+        unrelated_smiles = "O=O"
+        unrelated_mol = Chem.MolFromSmiles(unrelated_smiles)
+        n_node_features = len(get_atom_features(unrelated_mol.GetAtomWithIdx(0)))
+        n_edge_features = len(get_bond_features(unrelated_mol.GetBondBetweenAtoms(0, 1)))
+
+        # construct node feature matrix X of shape (n_nodes, n_node_features)
+        X = np.zeros((n_nodes, n_node_features))
+
+        for atom in mol.GetAtoms():
+            X[atom.GetIdx(), :] = get_atom_features(atom)
+
+        X = torch.tensor(X, dtype=torch.float)
+        X = torch.vstack((X, atom_bank))
+
+        # construct edge index array E of shape (2, n_edges)
+        (rows, cols) = np.nonzero(Chem.GetAdjacencyMatrix(mol))
+        torch_rows = torch.from_numpy(rows.astype(np.int64)).to(torch.long)
+        torch_cols = torch.from_numpy(cols.astype(np.int64)).to(torch.long)
+        E = torch.stack([torch_rows, torch_cols], dim=0)
+
+        # construct edge feature array EF of shape (n_edges, n_edge_features)
+        EF = np.zeros((n_edges, n_edge_features))
+
+        for (k, (i, j)) in enumerate(zip(rows, cols)):
+            EF[k] = get_bond_features(mol.GetBondBetweenAtoms(int(i), int(j)))
+
+        EF = torch.tensor(EF, dtype=torch.float)
+
+        # construct Pytorch Geometric data object and append to data list
+        data_list.append(torch_geometric.data.Data(x=X, edge_index=E, edge_attr=EF))
+
+    batch = torch_geometric.data.Batch.from_data_list(data_list)
+
+    return batch

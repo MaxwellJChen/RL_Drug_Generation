@@ -4,7 +4,7 @@ import pandas as pd
 import random
 
 from rollout import rollout
-from Model.SURGE import SURGE
+from Model.masked_model import SURGE
 from Model.graph_embedding import batch_from_smiles
 
 random.seed(1)

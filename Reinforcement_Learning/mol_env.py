@@ -68,19 +68,20 @@ class vectorized_mol_env():
 
     def _score(self, i):
         """
-        Calculates the final chemical score of a molecule. All intermediate scores are from -2 to 2.
+        Calculates the final chemical score of a molecule. All intermediate scores are from -2 to 2. Final score
+        from -6 to 6.
         """
-        qed = 4 * (QED.weights_mean(self.states[i]) - 0.5) # From -2 to 2 where 2 is the most drug-like
+        qed = 12 * (QED.weights_mean(self.states[i]) - 0.5) # From -2 to 2 where 2 is the most drug-like
 
         sas = sascorer.calculateScore(self.states[i]) # From 1 to 10 where 1 is the easiest to synthesize
-        sas = 4/9 * (sas - 5.5) # Scaled from -2 to 2
+        sas = 2/9 * (sas - 5.5) # Scaled from -2 to 2
         sas = 1 - sas # Transformed so that more accessible molecules have a higher score
 
         # Molecular weight score linearly decreases as weight deviates from mean and is between -2 and 2
         mw = Descriptors.MolWt(self.states[i])
-        mw = max(-2, -np.abs(mw - self.mw_mean)/self.mw_std + 2)
+        mw = max(-3, -np.abs(mw - self.mw_mean)/self.mw_std + 3)
 
-        return qed + sas + mw
+        return qed
 
     def _update(self, nmol, nfull, bond, i):
         """
@@ -179,7 +180,6 @@ class vectorized_mol_env():
             # Reset if model decides to terminate, molecules hit maximum size or weight, or max number of timesteps is reached
             if terminate[i] == 1 or self.mol_sizes[i] >= self.max_mol_size or self.mol_mws[i] >= self.max_mw or self.timestep >= self.max_steps:
 
-
                 if self.states[i].GetNumHeavyAtoms() == 1:
                     # Return lowest chemical score possible if state is a single carbon atom
                     rewards[i] = -6
@@ -187,6 +187,7 @@ class vectorized_mol_env():
                     rewards[i] = self._score(i)
 
                 # Reset environment to single carbon atom
+
                 self.states[i] = RWMol()
                 self.states[i].AddAtom(Chem.Atom('C'))
                 self.states[i].UpdatePropertyCache()
@@ -194,9 +195,9 @@ class vectorized_mol_env():
             # Score the step based on action validity and molecular weight
             elif valids[i]:
                 self.states[i] = self._update(nmol, nfull, bond, i)
-                rewards[i] = 0.5 + max(0, (-np.abs(self.mol_mws[i] - self.mw_mean)/self.mw_std + 1))/10
+                rewards[i] = 0.1 + max(0, (-np.abs(self.mol_mws[i] - self.mw_mean)/self.mw_std + 1))/10
             else: # Invalid action
-                rewards[i] = -0.5 + max(0, (-np.abs(self.mol_mws[i] - self.mw_mean)/self.mw_std + 1))/10
+                rewards[i] = -0.1 + max(0, (-np.abs(self.mol_mws[i] - self.mw_mean)/self.mw_std + 1))/10
 
         self.mol_sizes = [state.GetNumHeavyAtoms() for state in self.states]
         self.mol_mws = [Descriptors.MolWt(state) for state in self.states]

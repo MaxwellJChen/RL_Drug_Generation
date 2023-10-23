@@ -26,13 +26,15 @@ It cannot be applied to the SURGE act function but can be used in supervised lea
 but repeat operations between them.
 """
 
+max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
+atom_bank = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']
+
 def t_mask(state):
     """
     Returns the termination mask for a state.
     Termination:
         1. Must terminate if all atoms have reached maximum valence
     """
-    max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
 
     t_mask = torch.ones(2)
     valence_diffs = [max_valences[atom.GetSymbol()] - sum([int(bond.GetBondType()) for bond in atom.GetBonds()]) - atom.GetFormalCharge() for atom in state.GetAtoms()]
@@ -48,7 +50,6 @@ def nmol_mask(state):
     Nmol:
         2. Cannot choose an atom if it has reached its maximum valence
     """
-    max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
 
     nmol_mask = torch.ones(state.GetNumHeavyAtoms())
     valence_diffs = [max_valences[atom.GetSymbol()] - sum([int(bond.GetBondType()) for bond in atom.GetBonds()]) - atom.GetFormalCharge() for atom in state.GetAtoms()]
@@ -69,9 +70,6 @@ def nfull_mask(state, nmol: int):
         6. Cannot choose an atom if it already has a bond with nmol
         7. Cannot choose an atom if forming a bond between nmol and itself would result in a ring size greater than 7
     """
-
-    max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
-    atom_bank = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']
 
     nfull_mask = torch.ones(state.GetNumHeavyAtoms() + len(atom_bank))
     valence_diffs = [max_valences[atom.GetSymbol()] - sum([int(bond.GetBondType()) for bond in atom.GetBonds()]) - atom.GetFormalCharge() for atom in state.GetAtoms()]
@@ -113,9 +111,6 @@ def b_mask(state, nmol: int, nfull: int):
         8. Cannot choose a bond order too great for either nmol or nfull's remaining valence
     """
 
-    max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
-    atom_bank = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']
-
     b_mask = torch.ones(3)
 
     # 8. Cannot choose a bond order too great for either nmol or nfull's remaining valence
@@ -151,9 +146,6 @@ def mask(state, nmol, nfull):
         Bond:
             8. Cannot choose a bond order too great for either nmol or nfull's remaining valence
     """
-
-    atom_bank = ['C', 'O', 'N', 'S', 'F', 'Cl', 'P', 'Br', 'I', 'B']
-    max_valences = {'C': 4, 'O': 2, 'N': 3, 'S': 6, 'F': 1, 'Cl': 1, 'P': 5, 'Br': 1, 'I': 1, 'B': 3}
 
     # Initialize masks to all ones (every option is available)
     t_mask = torch.ones(2)
